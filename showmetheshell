@@ -149,6 +149,7 @@ websocket '/' => sub {
                 my $esc = pack('C', 0x1B);
 
                 $text =~ s/\s+$//g;
+                $text = ' ' if $text eq '';
                 $text =~ s/ /&nbsp;/g;
 
                 $text =~ s/$esc\[(.*?)m/&_insert_color($1)/ge;
