@@ -1,0 +1,18 @@
+HTML5 WebSocket Shell on top of Mojolicious
+
+Features:
+
+ * CTRL keys (-D, -C, -L, -W etc)
+ * Colors
+
+Prerequisites:
+
+ * IO::Pty
+ * Term::VT102
+ * Mojo
+ * Mojo::JSON::Any
+
+TODO:
+
+ * Cursor
+ * Unicode
