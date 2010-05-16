@@ -83,6 +83,8 @@ websocket '/' => sub {
 
                 my $code = $message->{code};
 
+                warn "code=$code";
+
                 if ($code < 128) {
                     $buffer = pack('C', $code);
                 }
@@ -391,7 +393,7 @@ installed. It is used as workaround.
                     $(document).keydown(function (e) {
                         var code = (e.keyCode ? e.keyCode : e.which);
 
-                        if (code == 8) {
+                        if (code == 8 || code == 9) {
                             ws.send($.toJSON({"type":"key","code":code}));
 
                             return false;
@@ -421,6 +423,8 @@ installed. It is used as workaround.
                             if (e.charCode > 128) {
                                 code = e.charCode;
                             }
+
+                            console.log(code);
 
                             ws.send($.toJSON({"type":"key","code":code}));
                         }
