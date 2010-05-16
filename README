@@ -1,5 +1,8 @@
 HTML5 WebSocket Shell on top of Mojolicious
 
+See screenshots here
+http://github.com/vti/showmetheshell/tree/master/screenshots
+
 Features:
 
  * CTRL keys (-D, -C, -L, -W etc)
