@@ -1,0 +1,9 @@
+[submodule "mojo-json-any"]
+	path = mojo-json-any
+	url = git://github.com/vti/mojo-json-any.git
+[submodule "public/web-socket-js"]
+	path = public/web-socket-js
+	url = git://github.com/gimite/web-socket-js.git
+[submodule "mojo"]
+	path = mojo
+	url = git://github.com/kraih/mojo.git

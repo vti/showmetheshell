@@ -1,0 +1,427 @@
+#!/usr/bin/perl
+
+use FindBin;
+use lib "$FindBin::Bin/mojo/lib";
+use lib "$FindBin::Bin/mojo-json-any/lib";
+
+use Mojolicious::Lite;
+use Mojo::JSON::Any;
+
+use Term::VT102;
+use IO::Handle;
+use POSIX ':sys_wait_h';
+use IO::Pty;
+
+use IO::Poll qw/POLLIN/;
+
+my $loop = Mojo::IOLoop->singleton;
+
+@ARGV = qw/daemon/ unless @ARGV;
+
+websocket '/' => sub {
+    my $self = shift;
+    my $tx   = $self->tx;
+
+    app->log->debug("Client connected");
+
+    my $vt = Term::VT102->new('cols' => 80, 'rows' => 24);
+
+    app->log->debug("Creating VT102");
+
+    # Convert linefeeds to linefeed + carriage return.
+    $vt->option_set('LFTOCRLF', 1);
+
+    # Make sure line wrapping is switched on.
+    $vt->option_set('LINEWRAP', 1);
+
+    app->log->debug("Creating Pty");
+    my $pty      = new IO::Pty;
+    my $tty_name = $pty->ttyname();
+    if (not defined $tty_name) {
+        die "Could not assign a pty";
+    }
+    $pty->autoflush();
+
+    my $pid = _spawn_shell($vt, $pty, 'zsh');
+
+    app->log->debug("Setup Terminal callbacks");
+    $vt->callback_set(
+        'OUTPUT' => sub {
+            my ($vtobject, $type, $arg1, $arg2, $private) = @_;
+
+            if ($type eq 'OUTPUT') {
+
+                $pty->syswrite ($arg1, length $arg1);
+            }
+        } => $pty
+    );
+
+    my $changedrows = {};
+    $vt->callback_set('ROWCHANGE',   \&_vt_rowchange, $changedrows);
+    $vt->callback_set('CLEAR',       \&_vt_changeall, $changedrows);
+    $vt->callback_set('SCROLL_UP',   \&_vt_changeall, $changedrows);
+    $vt->callback_set('SCROLL_DOWN', \&_vt_changeall, $changedrows);
+
+    my $poll = IO::Poll->new;
+    my $fh = IO::Handle->new_from_fd($pty->fileno, 'r');
+    $fh->blocking(0);
+    $poll->mask($fh => POLLIN);
+
+    $self->receive_message(
+        sub {
+            my ($self, $message) = @_;
+
+            my $json = Mojo::JSON::Any->new;
+
+            $message = $json->decode($message);
+            return unless $message || $json->error;
+
+            my $type = $message->{type};
+            if ($type eq 'key') {
+                my $code = pack('C', $message->{code});
+
+                $pty->syswrite($code, length $code);
+            }
+            else {
+                warn "Unknown type '$type'";
+            }
+        }
+    );
+
+    $self->finished(
+        sub {
+            app->log->debug('Client disconnected');
+
+            $loop->tick_cb(sub {});
+            $pty->close;
+            undef $pty;
+            undef $vt;
+        }
+    );
+
+    $loop->tick_cb(
+        sub {
+            my $loop = shift;
+
+            $poll->poll(0);
+
+            return $self->finish if (waitpid ($pid, &WNOHANG) > 0);
+
+            if (my @read = $poll->handles(POLLIN)) {
+                my $nr = $pty->sysread(my $chunk, 1024);
+
+                return $self->finish if ((defined $nr) && ($nr == 0));
+                if ((defined $nr) && ($nr > 0)) {
+                    $vt->process($chunk);
+                    syswrite STDERR, $chunk if (! -t STDERR);
+                }
+            }
+
+            foreach my $row (sort keys %$changedrows) {
+                my $text = $vt->row_sgrtext($row);
+                delete $changedrows->{$row};
+
+                $text =~ s/ /&nbsp;/g;
+
+                my $esc = pack('C', 0x1B);
+                $text =~ s/$esc\[(.*?)m/&_insert_color($1)/ge;
+
+                _send_message($self, type => 'row', row => $row, text => $text);
+            }
+        }
+    );
+};
+
+sub _insert_color {
+    my $color = shift;
+
+    my %colors = (
+        0 => 'reset',
+        1 => 'bright',
+        2 => 'dim',
+        4 => 'underscore',
+        5 => 'blink',
+        7 => 'reverse',
+        8 => 'hidden',
+
+        # Foreground Colours
+        30 => 'fg-black',
+        31 => 'fg-red',
+        32 => 'fg-green',
+        33 => 'fg-yellow',
+        34 => 'fg-blue',
+        35 => 'fg-magenta',
+        36 => 'fg-cyan',
+        37 => 'fg-white',
+
+        # Background Colours
+        40 => 'bg-black',
+        41 => 'bg-red',
+        42 => 'bg-green',
+        43 => 'bg-yellow',
+        44 => 'bg-blue',
+        45 => 'bg-magenta',
+        46 => 'bg-cyan',
+        47 => 'bg-white',
+    );
+
+    my @attrs = split ';' => $color;
+
+    my $string = '';
+    foreach my $attr (@attrs) {
+        if (my $class = $colors{$attr}) {
+            $string .= '</span>' if $class eq 'reset';
+
+            $string .= qq/<span class="$class">/;
+
+            $string .= '</span>' if $class eq 'reset';
+        }
+    }
+
+    return $string;
+}
+
+get '/' => sub {
+    my $self = shift;
+
+    my $url = $self->req->url->base->clone;
+    $url->scheme($self->req->is_secure ? 'wss' : 'ws');
+    $url->query->params([]);
+
+    $self->stash(websocket_url => $url->to_abs);
+} => 'index';
+
+sub _message_to_json {
+    my %message = @_;
+
+    my $json = Mojo::JSON::Any->new;
+    return $json->encode({%message});
+}
+
+sub _send_message {
+    my $self = shift;
+
+    $self->send_message(_message_to_json(@_));
+}
+
+sub _vt_rowchange {
+    my ($vtobject, $type, $arg1, $arg2, $private) = @_;
+
+    $private->{$arg1} = time if (not exists $private->{$arg1});
+}
+
+sub _vt_changeall {
+    my ($vtobject, $type, $arg1, $arg2, $private) = @_;
+
+    for (my $row = 1; $row <= $vtobject->rows; $row++) {
+        $private->{$row} = 0;
+    }
+}
+
+sub _spawn_shell {
+    my ($vt, $pty, $cmd) = @_;
+
+    my $pid = fork;
+    if (not defined $pid) {
+        die "Cannot fork: $!";
+    }
+    elsif ($pid == 0) {
+        # Child process - set up stdin/out/err and run the command.
+
+        # Become process group leader.
+        if (not POSIX::setsid()) {
+            warn "Couldn't perform setsid: $!";
+        }
+
+        # Get details of the slave side of the pty.
+        my $tty = $pty->slave();
+        my $tty_name = $tty->ttyname();
+
+        # File descriptor shuffling - close the pty master, then close
+        # stdin/out/err and reopen them to point to the pty slave.
+        close($pty);
+        close(STDIN);
+        close(STDOUT);
+        open(STDIN, "<&" . $tty->fileno())
+          || die "Couldn't reopen " . $tty_name . " for reading: $!";
+        open(STDOUT, ">&" . $tty->fileno())
+          || die "Couldn't reopen " . $tty_name . " for writing: $!";
+        close(STDERR);
+        open(STDERR, ">&" . $tty->fileno())
+          || die "Couldn't redirect STDERR: $!";
+
+        # Set sane terminal parameters.
+        system 'stty sane';
+
+        # Set the terminal size with stty.
+        system 'stty rows ' . $vt->rows;
+        system 'stty cols ' . $vt->cols;
+
+        # Finally, run the command, and die if we can't.
+        exec $cmd;
+        die "Cannot exec '$cmd': $!";
+    }
+    else {
+        return $pid;
+    }
+}
+
+# see script/flash-policy-server
+#print
+#  "Remember, you need to also run script/flash-policy-server as root for this to work...\n";
+
+app->start;
+
+1;
+
+__DATA__
+
+@@ index.html.ep
+% layout 'wrapper';
+Please, enable JavaScript.<br /><br />
+
+If your browser doesn't support Websockets,<br />
+make sure you have Flash<br />
+installed. It is used as workaround.
+
+@@ layouts/wrapper.html.ep
+<!doctype html><html>
+    <head>
+        <title>Shell</title>
+        <link rel="stylesheet" href="/styles.css" type="text/css" />
+        <script type="text/javascript" src="/jquery.min.js"></script>
+        <script type="text/javascript" src="/jquery.json.min.js"></script>
+        <script type="text/javascript">
+            // Only load the flash fallback when needed
+            if (!('WebSocket' in window)) {
+                document.write([
+                    '<scr'+'ipt type="text/javascript" src="/web-socket-js/swfobject.js"></scr'+'ipt>',
+                    '<scr'+'ipt type="text/javascript" src="/web-socket-js/FABridge.js"></scr'+'ipt>',
+                    '<scr'+'ipt type="text/javascript" src="/web-socket-js/web_socket.js"></scr'+'ipt>'
+                ].join(''));
+            }
+        </script>
+        <script type="text/javascript">
+            if (WebSocket.__initialize) {
+                // Set URL of your WebSocketMain.swf here:
+                WebSocket.__swfLocation = '/web-socket-js/WebSocketMain.swf';
+            }
+
+            $(document).ready(function() {
+                var container = $('#container');
+                container.html('');
+
+                container.html('Connecting...');
+
+                var ws = new WebSocket("<%= stash 'websocket_url' %>");
+
+                ws.onerror = function(e) {
+                    container.html("Error: " + e);
+                };
+
+                ws.onopen = function() {
+                    container.html('Connected. Loading...');
+
+                    init();
+                };
+
+                ws.onmessage = function(e) {
+                    var data = $.evalJSON(e.data);
+                    var type = data.type;
+
+                    if (type == 'row') {
+                        updateRow(data.row, data.text);
+                    }
+                    else if (type == 'cursor') {
+                        updateCursor(data.row, data.col);
+                    }
+                };
+
+                ws.onclose = function() {
+                    container.html('Disconnected. <a href="/">Reconnect</a>');
+                }
+
+                function init() {
+                    container.html('');
+
+                    container.append('<div class="menu"><a href="/">Reconnect</a> <a href="#" id="disconnect">Disconnect</a></div>');
+                    container.append('<div id="shell"></div>');
+
+                    var shell = $('#shell');
+
+                    for (var i = 1; i <= 24; i++) {
+                        shell.append('<div class="row" id="row' + i + '"></div>');
+                    }
+
+                    $(document).keyup(function (e) {
+                        var code = (e.keyCode ? e.keyCode : e.which);
+
+                        if (code == 27) {
+                            ws.send($.toJSON({"type":"key","code":code}));
+                        }
+                    });
+
+                    $(document).keydown(function (e) {
+                        var code = (e.keyCode ? e.keyCode : e.which);
+
+                        if (code == 8) {
+                            ws.send($.toJSON({"type":"key","code":code}));
+
+                            return false;
+                        }
+                    });
+
+                    $('#disconnect').click(function () {
+                        ws.close();
+                        return false;
+                    });
+
+                    $(document).keypress(function (e) {
+                        var code = (e.keyCode ? e.keyCode : e.which);
+
+                        //console.log(code);
+
+                        if (e.ctrlKey) {
+
+                            // Firefox
+                            if (code >= 97) {
+                                code -= 96;
+                            }
+
+                            ws.send($.toJSON({"type":"key","code":code}));
+
+                            return false;
+                        }
+                        else {
+                            ws.send($.toJSON({"type":"key","code":code}));
+                        }
+
+                        return false;
+                    });
+                }
+
+                function updateRow(n, data) {
+                    var row = $('#row' + n);
+                    row.html(data);
+                }
+
+                function updateCursor(r, c) {
+                    //var row = $('#row' + r);
+                    //row.append('<span class="cursor">&nbsp;</span>');
+                    //alert('cursor!');
+                }
+            });
+        </script>
+    </head>
+    <body>
+        <div class="container">
+            <table border="0" height="100%" style="margin:auto">
+            <tr><td style="vertical-align:middle">
+                <div id="container">
+                    <%== content %>
+                </div>
+            </td></tr>
+            </table>
+        </div>
+    </body>
+</html>
