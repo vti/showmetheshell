@@ -6,6 +6,7 @@ use lib "$FindBin::Bin/mojo-json-any/lib";
 
 use Mojolicious::Lite;
 use Mojo::JSON::Any;
+use Mojo::ByteStream;
 
 use Term::VT102;
 use IO::Handle;
@@ -78,9 +79,26 @@ websocket '/' => sub {
 
             my $type = $message->{type};
             if ($type eq 'key') {
-                my $code = pack('C', $message->{code});
+                my $buffer;
 
-                $pty->syswrite($code, length $code);
+                my $code = $message->{code};
+
+                if ($code < 128) {
+                    $buffer = pack('C', $code);
+                }
+                elsif ($code > 128 && $code < 2048) {
+                    my $one = ($code >> 6) | 192;
+                    my $two = ($code & 63) | 128;
+                    $buffer = pack('CC', $one, $two);
+                }
+                else {
+                    my $one   = (($code >> 12) | 224);
+                    my $two   = ((($code >> 6) & 63) | 128);
+                    my $three = (($code & 63) | 128);
+                    $buffer = pack('CCC', $one, $two, $three);
+                }
+
+                $pty->syswrite($buffer, length $buffer);
             }
             else {
                 warn "Unknown type '$type'";
@@ -121,9 +139,16 @@ websocket '/' => sub {
                 my $text = $vt->row_sgrtext($row);
                 delete $changedrows->{$row};
 
-                $text =~ s/ /&nbsp;/g;
+                # Hack!!1
+                my $d0 = pack('C', 0xd0);
+                $text =~ s/$d0$d0/$d0/g;
+                $text = Mojo::ByteStream->new($text)->decode('UTF-8');
 
                 my $esc = pack('C', 0x1B);
+
+                $text =~ s/\s+$//g;
+                $text =~ s/ /&nbsp;/g;
+
                 $text =~ s/$esc\[(.*?)m/&_insert_color($1)/ge;
 
                 _send_message($self, type => 'row', row => $row, text => $text);
@@ -194,14 +219,16 @@ get '/' => sub {
 sub _message_to_json {
     my %message = @_;
 
-    my $json = Mojo::JSON::Any->new;
+    my $json = Mojo::JSON->new;
     return $json->encode({%message});
 }
 
 sub _send_message {
     my $self = shift;
 
-    $self->send_message(_message_to_json(@_));
+    my $json = _message_to_json(@_);
+    $json = Mojo::ByteStream->new($json)->decode('UTF-8');
+    $self->send_message($json);
 }
 
 sub _vt_rowchange {
@@ -379,8 +406,6 @@ installed. It is used as workaround.
                     $(document).keypress(function (e) {
                         var code = (e.keyCode ? e.keyCode : e.which);
 
-                        //console.log(code);
-
                         if (e.ctrlKey) {
 
                             // Firefox
@@ -393,12 +418,40 @@ installed. It is used as workaround.
                             return false;
                         }
                         else {
+                            if (e.charCode > 128) {
+                                code = e.charCode;
+                            }
+
                             ws.send($.toJSON({"type":"key","code":code}));
                         }
 
                         return false;
                     });
                 }
+
+                function toUTF(string) {
+                    string = string.replace(/\r\n/g, "\n");
+                    var utftext = "";
+
+                    for (var n = 0; n < string.length; n++) {
+                        var c = string.charCodeAt(n);
+
+                        if (c < 128) {
+                            utftext += String.fromCharCode(c);
+                        }
+                        else if((c > 127) && (c < 2048)) {
+                            utftext += String.fromCharCode((c >> 6) | 192);
+                            utftext += String.fromCharCode((c & 63) | 128);
+                        }
+                        else {
+                            utftext += String.fromCharCode((c >> 12) | 224);
+                            utftext += String.fromCharCode(((c >> 6) & 63) | 128);
+                            utftext += String.fromCharCode((c & 63) | 128);
+                        }
+                    }
+
+                    return utftext;
+                };
 
                 function updateRow(n, data) {
                     var row = $('#row' + n);
