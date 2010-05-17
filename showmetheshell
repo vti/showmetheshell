@@ -102,6 +102,29 @@ websocket '/' => sub {
 
                 $pty->syswrite($buffer, length $buffer);
             }
+            elsif ($type eq 'action') {
+                my $action = $message->{action};
+
+                warn "action=$action";
+
+                my $esc = pack('C', 0x1B);
+
+                my $buffer;
+                if ($action eq 'left') {
+                    $buffer = "$esc\[D";
+                }
+                elsif ($action eq 'top') {
+                    $buffer = "$esc\[A";
+                }
+                elsif ($action eq 'right') {
+                    $buffer = "$esc\[C";
+                }
+                elsif ($action eq 'down') {
+                    $buffer = "$esc\[B";
+                }
+
+                $pty->syswrite($buffer, length $buffer);
+            }
             else {
                 warn "Unknown type '$type'";
             }
@@ -383,80 +406,70 @@ installed. It is used as workaround.
                         shell.append('<div class="row" id="row' + i + '"></div>');
                     }
 
-                    $(document).keyup(function (e) {
-                        var code = (e.keyCode ? e.keyCode : e.which);
-
-                        if (code == 27) {
-                            ws.send($.toJSON({"type":"key","code":code}));
-                        }
-                    });
-
-                    $(document).keydown(function (e) {
-                        var code = (e.keyCode ? e.keyCode : e.which);
-
-                        if (code == 8 || code == 9) {
-                            ws.send($.toJSON({"type":"key","code":code}));
-
-                            return false;
-                        }
-                    });
-
                     $('#disconnect').click(function () {
                         ws.close();
                         return false;
                     });
 
-                    $(document).keypress(function (e) {
-                        var code = (e.keyCode ? e.keyCode : e.which);
+                    $(document).bind('keyup', function (e) {
+                        var code = e.keyCode || e.which;
+                        if (code == 27) {
+                            ws.send($.toJSON({"type":"key","code":code}));
+                        }
+
+                    });
+
+                    $(document).bind('keypress', function(e) {
+                        var code = e.keyCode || e.which;
 
                         if (e.ctrlKey) {
-
                             // Firefox
                             if (code >= 97) {
                                 code -= 96;
                             }
 
                             ws.send($.toJSON({"type":"key","code":code}));
-
-                            return false;
+                            return true;
                         }
-                        else {
-                            if (e.charCode > 128) {
-                                code = e.charCode;
-                            }
 
-                            console.log(code);
-
-                            ws.send($.toJSON({"type":"key","code":code}));
+                        // Pass arrows
+                        if (!e.shiftKey && (code >= 37 && code <= 40)) {
+                            return;
                         }
+
+                        // Unicode?
+                        if (e.charCode > 128) {
+                            code = e.charCode;
+                        }
+
+                        ws.send($.toJSON({"type":"key","code":code}));
 
                         return false;
                     });
+
+                    $(document).keydown(function (e) {
+                        var code = (e.keyCode ? e.keyCode : e.which);
+
+                        // Enter and tab
+                        if (code == 8 || code == 9) {
+                            ws.send($.toJSON({"type":"key","code":code}));
+
+                            return false;
+                        }
+
+                        if (!e.shiftKey && (code >= 37 && code <= 40)) {
+                            var action;
+                            switch (code) {
+                                case 37: action = 'left'; break;
+                                case 38: action = 'up'; break;
+                                case 39: action = 'right'; break;
+                                case 40: action = 'down'; break;
+                            }
+                            ws.send($.toJSON({"type":"action","action":action}));
+                            return false;
+                        }
+                    });
                 }
-
-                function toUTF(string) {
-                    string = string.replace(/\r\n/g, "\n");
-                    var utftext = "";
-
-                    for (var n = 0; n < string.length; n++) {
-                        var c = string.charCodeAt(n);
-
-                        if (c < 128) {
-                            utftext += String.fromCharCode(c);
-                        }
-                        else if((c > 127) && (c < 2048)) {
-                            utftext += String.fromCharCode((c >> 6) | 192);
-                            utftext += String.fromCharCode((c & 63) | 128);
-                        }
-                        else {
-                            utftext += String.fromCharCode((c >> 12) | 224);
-                            utftext += String.fromCharCode(((c >> 6) & 63) | 128);
-                            utftext += String.fromCharCode((c & 63) | 128);
-                        }
-                    }
-
-                    return utftext;
-                };
 
                 function updateRow(n, data) {
                     var row = $('#row' + n);
