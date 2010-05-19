@@ -210,6 +210,10 @@ post '/admin' => sub {
 
     if ($self->param('save-and-reload')) {
         $config = app->plugins->load_plugin(app, 'json_config');
+
+        foreach my $id (keys %$clients) {
+            $clients->{$id}->finish;
+        }
     }
 
     return $self->redirect_to('admin');
