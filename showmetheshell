@@ -34,7 +34,8 @@ my $config = plugin 'json_config' => {
             root  => {password => 'toor', rw => 1, is_admin => 1},
             user  => {password => 'resu', rw => 1},
             guest => {password => 'guest'}
-        }
+        },
+        max_clients => 0
     }
 };
 
@@ -45,6 +46,8 @@ websocket '/' => sub {
     my $tx   = $self->tx;
 
     return $self->finish unless _is_allowed($self);
+
+    return $self->finish if _is_limit_reached($self);
 
     app->log->debug("Client connected");
 
@@ -172,6 +175,8 @@ ladder sub {
 
     _render_forbidden($self), return 0 unless _is_allowed($self);
 
+    _render_limit_reached($self), return 0 if _is_limit_reached($self);
+
     return 1;
 };
 
@@ -239,6 +244,12 @@ sub _render_forbidden {
     $self->render('forbidden');
 }
 
+sub _render_limit_reached {
+    my $self = shift;
+
+    $self->render('limit_reached');
+}
+
 sub _is_allowed {
     my $self = shift;
 
@@ -268,6 +279,19 @@ sub _is_allowed_to_write {
     return unless $user->{rw};
 
     return 1;
+}
+
+sub _is_limit_reached {
+    my $self = shift;
+
+    # No limit
+    return 0 unless defined $config->{max_clients};
+
+    # Admin can always connect
+    return 0 if _is_admin($self);
+
+    # Not yet connected, that's why +1
+    return (scalar keys %$clients) + 1 > $config->{max_clients};
 }
 
 sub _get_user {
@@ -549,6 +573,9 @@ __DATA__
 
 @@ forbidden.html.ep
 Forbidden
+
+@@ limit_reached.html.ep
+Sorry. Too many users are connected.
 
 @@ index.html.ep
 Welcome!
