@@ -121,6 +121,8 @@ websocket '/' => sub {
 
             delete $clients->{$id};
 
+            _send_message_to_all($self, 'status', clients => scalar keys %$clients);
+
             # Last client disconnected
             if (!%$clients) {
                 $loop->tick_cb(sub {});

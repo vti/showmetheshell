@@ -37,6 +37,7 @@ function Shell(o) {
 
     self.ws.onclose = function() {
         container.html('Disconnected. <a href="/">Reconnect</a>');
+        $('#clients').html('n/a');
     }
 
     self.init = function() {
