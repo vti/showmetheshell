@@ -24,8 +24,9 @@ my $pty;
 
 my $config = plugin 'json_config' => {
     default => {
+        shell  => '/bin/sh',
         secret => 'Show me the code',
-        users => {
+        users  => {
             root  => {password => 'toor', rw => 1, is_admin => 1},
             user  => {password => 'resu', rw => 1},
             guest => {password => 'guest'}
@@ -389,7 +390,7 @@ sub _vt_new {
     }
     $pty->autoflush();
 
-    my $pid = _spawn_shell($vt, $pty, 'zsh');
+    my $pid = _spawn_shell($vt, $pty, $config->{shell});
 
     app->log->debug("Setup Terminal callbacks");
 
