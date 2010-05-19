@@ -26,7 +26,8 @@ my $config = plugin 'json_config' => {
     default => {
         secret => 'Show me the code',
         users => {
-            root  => {password => 'toor', rw => 1},
+            root  => {password => 'toor', rw => 1, is_admin => 1},
+            user  => {password => 'resu', rw => 1},
             guest => {password => 'guest'}
         }
     }
@@ -56,7 +57,7 @@ websocket '/' => sub {
         sub {
             my ($self, $message) = @_;
 
-            return unless $user->{rw};
+            return unless _is_allowed_to_write($self);
 
             $message = _json_to_message($message);
             return unless $message;
@@ -158,20 +159,57 @@ post '/' => sub {
     return $self->redirect_to('shell');
 } => 'index';
 
-post '/logout' => sub {
+# Anything below needs authentication
+ladder sub {
     my $self = shift;
 
-    return _render_forbidden($self) unless _is_allowed($self);
+    _render_forbidden($self), return 0 unless _is_allowed($self);
+
+    return 1;
+};
+
+post '/logout' => sub {
+    my $self = shift;
 
     _logout($self);
 
     return $self->redirect_to('index');
 };
 
-get '/shell' => sub {
+get '/admin' => sub {
     my $self = shift;
 
-    return _render_forbidden($self) unless _is_allowed($self);
+    return _render_forbidden($self) unless _is_admin($self);
+
+    my $json = Mojo::JSON::Any->new;
+    my $json_config = $json->encode($config);
+
+    $self->stash(json_config => $json_config);
+} => 'admin';
+
+post '/admin' => sub {
+    my $self = shift;
+
+    return _render_forbidden($self) unless _is_admin($self);
+
+    my $json_config = $self->param('json_config');
+
+    my $conf = File::Basename::basename($0) . '.json';
+    $conf = app->home->rel_file($conf);
+
+    open(my $file, '>', $conf) or return $self->render_exception($!);
+    print $file $json_config;
+    close $file;
+
+    if ($self->param('save-and-reload')) {
+        $config = app->plugins->load_plugin(app, 'json_config');
+    }
+
+    return $self->redirect_to('admin');
+} => 'admin';
+
+get '/shell' => sub {
+    my $self = shift;
 
     my $url = $self->req->url->base->clone;
     $url->scheme($self->req->is_secure ? 'wss' : 'ws');
@@ -197,6 +235,26 @@ sub _is_allowed {
     return unless $username;
 
     return unless $config->{users}->{$username};
+
+    return 1;
+}
+
+sub _is_admin {
+    my $self = shift;
+
+    my $user = _get_user($self);
+    return unless $user->{is_admin};
+
+    return 1;
+}
+
+sub _is_allowed_to_write {
+    my $self = shift;
+
+    return 1 if _is_admin($self);
+
+    my $user = _get_user($self);
+    return unless $user->{rw};
 
     return 1;
 }
@@ -533,6 +591,9 @@ installed. It is used as workaround.
         <div class="right">
             <form method="post" action="/logout">
             <%= $user->{username} %> / <%= $user->{rw} ? 'read write' : 'read only' %>
+% if ($user->{is_admin}) {
+            <a href="<%= url_for 'admin' %>">admin</a>
+% }
             <input type="submit" value="Logout" />
             </form>
         </div>
@@ -550,3 +611,11 @@ installed. It is used as workaround.
         </div>
     </body>
 </html>
+
+@@ admin.html.ep
+% my $json_config = param('json_config') || stash('json_config');
+<form method="post">
+<textarea name="json_config"><%= $json_config %></textarea><br />
+<input type="submit" name="save" value="Save" />
+<input type="submit" name="save-and-reload" value="Save and reload" />
+</form>
