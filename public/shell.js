@@ -59,7 +59,7 @@ function Shell(o) {
         }
 
         for (var i = 1; i <= 24; i++) {
-            shell.append('<div class="row" id="row' + i + '"></div>');
+            shell.append('<div class="row" id="row' + i + '">&nbsp;</div>');
         }
         shell.append('<div class="row space">' + spaces + '</div>');
 
