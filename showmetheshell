@@ -15,67 +15,51 @@ use IO::Pty;
 
 use IO::Poll qw/POLLIN/;
 
-my $loop = Mojo::IOLoop->singleton;
-
 @ARGV = qw/daemon/ unless @ARGV;
+
+my $loop = Mojo::IOLoop->singleton;
+my $clients = {};
+my $vt;
+my $pty;
+
+my $config = plugin 'json_config' => {
+    default => {
+        secret => 'Show me the code',
+        users => {
+            root  => {password => 'toor', rw => 1},
+            guest => {password => 'guest'}
+        }
+    }
+};
+
+app->secret($config->{secret});
 
 websocket '/' => sub {
     my $self = shift;
     my $tx   = $self->tx;
 
+    return $self->finish unless _is_allowed($self);
+
     app->log->debug("Client connected");
 
-    my $vt = Term::VT102->new('cols' => 80, 'rows' => 24);
+    my $id = "$tx";
 
-    app->log->debug("Creating VT102");
+    $clients->{$id} = $tx;
 
-    # Convert linefeeds to linefeed + carriage return.
-    $vt->option_set('LFTOCRLF', 1);
+    _send_message_to_all($self, 'status', clients => scalar keys %$clients);
 
-    # Make sure line wrapping is switched on.
-    $vt->option_set('LINEWRAP', 1);
+    my $user = _get_user($self);
 
-    app->log->debug("Creating Pty");
-    my $pty      = new IO::Pty;
-    my $tty_name = $pty->ttyname();
-    if (not defined $tty_name) {
-        die "Could not assign a pty";
-    }
-    $pty->autoflush();
-
-    my $pid = _spawn_shell($vt, $pty, 'zsh');
-
-    app->log->debug("Setup Terminal callbacks");
-    $vt->callback_set(
-        'OUTPUT' => sub {
-            my ($vtobject, $type, $arg1, $arg2, $private) = @_;
-
-            if ($type eq 'OUTPUT') {
-
-                $pty->syswrite ($arg1, length $arg1);
-            }
-        } => $pty
-    );
-
-    my $changedrows = {};
-    $vt->callback_set('ROWCHANGE',   \&_vt_rowchange, $changedrows);
-    $vt->callback_set('CLEAR',       \&_vt_changeall, $changedrows);
-    $vt->callback_set('SCROLL_UP',   \&_vt_changeall, $changedrows);
-    $vt->callback_set('SCROLL_DOWN', \&_vt_changeall, $changedrows);
-
-    my $poll = IO::Poll->new;
-    my $fh = IO::Handle->new_from_fd($pty->fileno, 'r');
-    $fh->blocking(0);
-    $poll->mask($fh => POLLIN);
+    $vt ||= _vt_new($self);
 
     $self->receive_message(
         sub {
             my ($self, $message) = @_;
 
-            my $json = Mojo::JSON::Any->new;
+            return unless $user->{rw};
 
-            $message = $json->decode($message);
-            return unless $message || $json->error;
+            $message = _json_to_message($message);
+            return unless $message;
 
             my $type = $message->{type};
             if ($type eq 'key') {
@@ -135,53 +119,102 @@ websocket '/' => sub {
         sub {
             app->log->debug('Client disconnected');
 
-            $loop->tick_cb(sub {});
-            $pty->close;
-            undef $pty;
-            undef $vt;
-        }
-    );
+            delete $clients->{$id};
 
-    $loop->tick_cb(
-        sub {
-            my $loop = shift;
-
-            $poll->poll(0);
-
-            return $self->finish if (waitpid ($pid, &WNOHANG) > 0);
-
-            if (my @read = $poll->handles(POLLIN)) {
-                my $nr = $pty->sysread(my $chunk, 1024);
-
-                return $self->finish if ((defined $nr) && ($nr == 0));
-                if ((defined $nr) && ($nr > 0)) {
-                    $vt->process($chunk);
-                    syswrite STDERR, $chunk if (! -t STDERR);
-                }
-            }
-
-            foreach my $row (sort keys %$changedrows) {
-                my $text = $vt->row_sgrtext($row);
-                delete $changedrows->{$row};
-
-                # Hack!!1
-                my $d0 = pack('C', 0xd0);
-                $text =~ s/$d0$d0/$d0/g;
-                $text = Mojo::ByteStream->new($text)->decode('UTF-8');
-
-                my $esc = pack('C', 0x1B);
-
-                $text =~ s/\s+$//g;
-                $text = ' ' if $text eq '';
-                $text =~ s/ /&nbsp;/g;
-
-                $text =~ s/$esc\[(.*?)m/&_insert_color($1)/ge;
-
-                _send_message($self, type => 'row', row => $row, text => $text);
+            # Last client disconnected
+            if (!%$clients) {
+                $loop->tick_cb(sub {});
+                undef $vt;
+                undef $pty;
             }
         }
     );
 };
+
+get '/' => sub {
+    my $self = shift;
+
+    return $self->redirect_to('shell') if _is_allowed($self);
+} => 'index';
+
+post '/' => sub {
+    my $self = shift;
+
+    my $username = $self->param('username');
+    my $password = $self->param('password');
+
+    my $ok =
+         $username
+      && $password
+      && $config->{users}->{$username}
+      && $config->{users}->{$username}->{password} eq $password;
+
+    return _render_forbidden($self) unless $ok;
+
+    $self->session(username => $username);
+
+    return $self->redirect_to('shell');
+} => 'index';
+
+post '/logout' => sub {
+    my $self = shift;
+
+    return _render_forbidden($self) unless _is_allowed($self);
+
+    _logout($self);
+
+    return $self->redirect_to('index');
+};
+
+get '/shell' => sub {
+    my $self = shift;
+
+    return _render_forbidden($self) unless _is_allowed($self);
+
+    my $url = $self->req->url->base->clone;
+    $url->scheme($self->req->is_secure ? 'wss' : 'ws');
+    $url->query->params([]);
+
+    $self->stash(websocket_url => $url->to_abs);
+
+    $self->stash(user => _get_user($self));
+} => 'shell';
+
+sub _render_forbidden {
+    my $self = shift;
+
+    $self->res->code(403);
+
+    $self->render('forbidden');
+}
+
+sub _is_allowed {
+    my $self = shift;
+
+    my $username = $self->session->{username};
+    return unless $username;
+
+    return unless $config->{users}->{$username};
+
+    return 1;
+}
+
+sub _get_user {
+    my $self = shift;
+
+    my $username = $self->session->{username};
+    my $user = $config->{users}->{$username};
+
+    $user->{username} = $username;
+
+    return $user;
+}
+
+sub _logout {
+    my $self = shift;
+
+    delete $self->session->{username};
+}
 
 sub _insert_color {
     my $color = shift;
@@ -232,29 +265,142 @@ sub _insert_color {
     return $string;
 }
 
-get '/' => sub {
-    my $self = shift;
+sub _json_to_message {
+    my $message = shift;
 
-    my $url = $self->req->url->base->clone;
-    $url->scheme($self->req->is_secure ? 'wss' : 'ws');
-    $url->query->params([]);
+    my $json = Mojo::JSON::Any->new;
 
-    $self->stash(websocket_url => $url->to_abs);
-} => 'index';
+    $message = $json->decode($message);
+    return unless $message || $json->error;
+
+    return $message;
+}
 
 sub _message_to_json {
     my %message = @_;
 
-    my $json = Mojo::JSON->new;
+    my $json = Mojo::JSON::Any->new;
     return $json->encode({%message});
 }
 
 sub _send_message {
     my $self = shift;
+    my $type = shift;
 
-    my $json = _message_to_json(@_);
+    my $json = _message_to_json(type => $type, @_);
     $json = Mojo::ByteStream->new($json)->decode('UTF-8');
     $self->send_message($json);
+}
+
+sub _send_message_to_all {
+    my $self = shift;
+    my $type = shift;
+
+    my $json = _message_to_json(type => $type, @_);
+
+    foreach my $id (keys %$clients) {
+        my $client = $clients->{$id};
+        next unless $client;
+
+        $client->send_message($json);
+    }
+}
+
+sub _vt_new {
+    my $self = shift;
+
+    app->log->debug("Creating VT102");
+
+    $vt = Term::VT102->new('cols' => 80, 'rows' => 24);
+
+    # Convert linefeeds to linefeed + carriage return.
+    $vt->option_set('LFTOCRLF', 1);
+
+    # Make sure line wrapping is switched on.
+    $vt->option_set('LINEWRAP', 1);
+
+    app->log->debug("Creating Pty");
+
+    $pty = new IO::Pty;
+
+    my $tty_name = $pty->ttyname();
+    if (not defined $tty_name) {
+        die "Could not assign a pty";
+    }
+    $pty->autoflush();
+
+    my $pid = _spawn_shell($vt, $pty, 'zsh');
+
+    app->log->debug("Setup Terminal callbacks");
+
+    $vt->callback_set(
+        'OUTPUT' => sub {
+            my ($vtobject, $type, $arg1, $arg2, $private) = @_;
+
+            if ($type eq 'OUTPUT') {
+
+                $pty->syswrite ($arg1, length $arg1);
+            }
+        } => $pty
+    );
+
+    my $changedrows = {};
+    $vt->callback_set('ROWCHANGE',   \&_vt_rowchange, $changedrows);
+    $vt->callback_set('CLEAR',       \&_vt_changeall, $changedrows);
+    $vt->callback_set('SCROLL_UP',   \&_vt_changeall, $changedrows);
+    $vt->callback_set('SCROLL_DOWN', \&_vt_changeall, $changedrows);
+
+    my $poll = IO::Poll->new;
+    my $fh = IO::Handle->new_from_fd($pty->fileno, 'r');
+    $fh->blocking(0);
+    $poll->mask($fh => POLLIN);
+
+    $loop->tick_cb(
+        sub {
+            my $loop = shift;
+
+            $poll->poll(0);
+
+            return $self->finish if (waitpid ($pid, &WNOHANG) > 0);
+
+            if (my @read = $poll->handles(POLLIN)) {
+                my $nr = $pty->sysread(my $chunk, 1024);
+
+                return $self->finish if ((defined $nr) && ($nr == 0));
+
+                if ((defined $nr) && ($nr > 0)) {
+                    $vt->process($chunk);
+                    syswrite STDERR, $chunk if (! -t STDERR);
+                }
+            }
+
+            foreach my $row (sort keys %$changedrows) {
+                my $text = $vt->row_sgrtext($row);
+                delete $changedrows->{$row};
+
+                #use Data::Hexdumper 'hexdump';
+
+                #warn hexdump $text;
+
+                # Hack!!1
+                my $d0 = pack('C', 0xd0);
+                $text =~ s/$d0$d0/$d0/g;
+                $text = Mojo::ByteStream->new($text)->decode('UTF-8');
+
+                my $esc = pack('C', 0x1B);
+
+                $text =~ s/\s+$//g;
+                $text = ' ' if $text eq '';
+                $text =~ s/ /&nbsp;/g;
+
+                $text =~ s/$esc\[(.*?)m/&_insert_color($1)/ge;
+
+                _send_message_to_all($self, 'row', row => $row, text => $text);
+            }
+        }
+    );
+
+    return $vt;
 }
 
 sub _vt_rowchange {
@@ -329,7 +475,18 @@ app->start;
 
 __DATA__
 
+@@ forbidden.html.ep
+Forbidden
+
 @@ index.html.ep
+Welcome!
+<form method="post">
+<input name="username" /><br />
+<input type="password" name="password" />
+<input type="submit" value="Login" />
+</form>
+
+@@ shell.html.ep
 % layout 'wrapper';
 Please, enable JavaScript.<br /><br />
 
@@ -338,12 +495,14 @@ make sure you have Flash<br />
 installed. It is used as workaround.
 
 @@ layouts/wrapper.html.ep
+% my $user = stash 'user';
 <!doctype html><html>
     <head>
         <title>Shell</title>
         <link rel="stylesheet" href="/styles.css" type="text/css" />
         <script type="text/javascript" src="/jquery.min.js"></script>
         <script type="text/javascript" src="/jquery.json.min.js"></script>
+        <script type="text/javascript" src="/shell.js"></script>
         <script type="text/javascript">
             // Only load the flash fallback when needed
             if (!('WebSocket' in window)) {
@@ -361,130 +520,23 @@ installed. It is used as workaround.
             }
 
             $(document).ready(function() {
-                var container = $('#container');
-                container.html('');
-
-                container.html('Connecting...');
-
-                var ws = new WebSocket("<%= stash 'websocket_url' %>");
-
-                ws.onerror = function(e) {
-                    container.html("Error: " + e);
-                };
-
-                ws.onopen = function() {
-                    container.html('Connected. Loading...');
-
-                    init();
-                };
-
-                ws.onmessage = function(e) {
-                    var data = $.evalJSON(e.data);
-                    var type = data.type;
-
-                    if (type == 'row') {
-                        updateRow(data.row, data.text);
-                    }
-                    else if (type == 'cursor') {
-                        updateCursor(data.row, data.col);
-                    }
-                };
-
-                ws.onclose = function() {
-                    container.html('Disconnected. <a href="/">Reconnect</a>');
-                }
-
-                function init() {
-                    container.html('');
-
-                    container.append('<div class="menu"><a href="/">Reconnect</a> <a href="#" id="disconnect">Disconnect</a></div>');
-                    container.append('<div id="shell"></div>');
-
-                    var shell = $('#shell');
-
-                    for (var i = 1; i <= 24; i++) {
-                        shell.append('<div class="row" id="row' + i + '"></div>');
-                    }
-
-                    $('#disconnect').click(function () {
-                        ws.close();
-                        return false;
-                    });
-
-                    $(document).bind('keyup', function (e) {
-                        var code = e.keyCode || e.which;
-                        if (code == 27) {
-                            ws.send($.toJSON({"type":"key","code":code}));
-                        }
-
-                    });
-
-                    $(document).bind('keypress', function(e) {
-                        var code = e.keyCode || e.which;
-
-                        if (e.ctrlKey) {
-                            // Firefox
-                            if (code >= 97) {
-                                code -= 96;
-                            }
-
-                            ws.send($.toJSON({"type":"key","code":code}));
-                            return true;
-                        }
-
-                        // Pass arrows
-                        if (!e.shiftKey && (code >= 37 && code <= 40)) {
-                            return;
-                        }
-
-                        // Unicode?
-                        if (e.charCode > 128) {
-                            code = e.charCode;
-                        }
-
-                        ws.send($.toJSON({"type":"key","code":code}));
-
-                        return false;
-                    });
-
-                    $(document).keydown(function (e) {
-                        var code = (e.keyCode ? e.keyCode : e.which);
-
-                        // Enter and tab
-                        if (code == 8 || code == 9) {
-                            ws.send($.toJSON({"type":"key","code":code}));
-
-                            return false;
-                        }
-
-                        if (!e.shiftKey && (code >= 37 && code <= 40)) {
-                            var action;
-                            switch (code) {
-                                case 37: action = 'left'; break;
-                                case 38: action = 'up'; break;
-                                case 39: action = 'right'; break;
-                                case 40: action = 'down'; break;
-                            }
-                            ws.send($.toJSON({"type":"action","action":action}));
-                            return false;
-                        }
-                    });
-                }
-
-                function updateRow(n, data) {
-                    var row = $('#row' + n);
-                    row.html(data);
-                }
-
-                function updateCursor(r, c) {
-                    //var row = $('#row' + r);
-                    //row.append('<span class="cursor">&nbsp;</span>');
-                    //alert('cursor!');
-                }
+                var shell = new Shell({
+                    "url" : "<%= stash 'websocket_url' %>",
+                    "rw" : <%= $user->{rw} ? 1 : 0 %>
+                });
             });
         </script>
     </head>
     <body>
+        <div class="right">
+            <form method="post" action="/logout">
+            <%= $user->{username} %> / <%= $user->{rw} ? 'read write' : 'read only' %>
+            <input type="submit" value="Logout" />
+            </form>
+        </div>
+        <div id="status">
+            clients: <span id="clients">n/a</span>
+        </div>
         <div class="container">
             <table border="0" height="100%" style="margin:auto">
             <tr><td style="vertical-align:middle">

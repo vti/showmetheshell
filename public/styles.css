@@ -8,6 +8,23 @@
     height:500px;
 }
 
+#status {
+    position:absolute;
+    top:0px;
+    left:0px;
+    background:black;
+    color:white;
+    padding:0.5em;
+}
+
+.readonly {
+    border:0.5em solid red;
+}
+
+.right {
+    text-align:right;
+}
+
 .menu {
     text-align:right;
 }
