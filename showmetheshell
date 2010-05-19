@@ -1,5 +1,7 @@
 #!/usr/bin/perl
 
+# Copyright (C) 2010, Viacheslav Tykhanovskyi
+
 use FindBin;
 use lib "$FindBin::Bin/mojo/lib";
 use lib "$FindBin::Bin/mojo-json-any/lib";
@@ -620,3 +622,40 @@ installed. It is used as workaround.
 <input type="submit" name="save" value="Save" />
 <input type="submit" name="save-and-reload" value="Save and reload" />
 </form>
+
+__END__
+
+=head1 DESCRIPTION
+
+A HTML5 WebSocket Shell built on top of an amazing Mojolicious web
+framework.
+
+=head2 Features
+
+=over
+
+ * CTRL keys (^D, ^C, ^L, ^W etc)
+ * Tab key
+ * Arrow keys
+ * Colors
+
+=back
+
+=head1 DEVELOPMENT
+
+=head2 Repository
+
+    http://github.com/vti/showmetheshell
+
+=head1 AUTHOR
+
+Viacheslav Tykhanovskyi, C<vti@cpan.org>.
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright (C) 2010, Viacheslav Tykhanovskyi
+
+This program is free software, you can redistribute it and/or modify it under
+the terms of the Artistic License version 2.0.
+
+=cut
