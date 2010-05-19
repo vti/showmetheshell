@@ -1,11 +1,6 @@
-#container {
-}
-
 #shell {
     padding:0.5em;
     background:black;
-    width:640px;
-    height:500px;
 }
 
 #status {
@@ -35,7 +30,10 @@
     /*border:1px solid #008C00;*/
     color:#ccc;
     font-family: Monaco, Courier, monospace;
-    font-size: 8;
+    font-size:12px;
+}
+
+.space {
 }
 
 .cursor {

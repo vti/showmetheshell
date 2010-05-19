@@ -53,9 +53,15 @@ function Shell(o) {
 
         var shell = $('#shell');
 
+        var spaces = '';
+        for (var i = 1; i <= 80; i++) {
+            spaces = spaces + "&nbsp;";
+        }
+
         for (var i = 1; i <= 24; i++) {
             shell.append('<div class="row" id="row' + i + '"></div>');
         }
+        shell.append('<div class="row space">' + spaces + '</div>');
 
         $('#disconnect').click(function () {
             self.ws.close();
