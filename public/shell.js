@@ -27,6 +27,11 @@ function Shell(o) {
         if (type == 'status') {
             $('#clients').html(data.clients);
         }
+        else if (type == 'history') {
+            for (var i = 0; i < data.history.length; i++) {
+                self.updateRow(i + 1, data.history[i]);
+            }
+        }
         else if (type == 'row') {
             self.updateRow(data.row, data.text);
         }

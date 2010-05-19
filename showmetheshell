@@ -24,6 +24,8 @@ my $clients = {};
 my $vt;
 my $pty;
 
+my $history = [];
+
 my $config = plugin 'json_config' => {
     default => {
         shell  => '/bin/sh',
@@ -55,6 +57,8 @@ websocket '/' => sub {
     my $user = _get_user($self);
 
     $vt ||= _vt_new($self);
+
+    _send_message($self, 'history', history => $history);
 
     $self->receive_message(
         sub {
@@ -458,6 +462,7 @@ sub _vt_new {
 
                 $text =~ s/$esc\[(.*?)m/&_insert_color($1)/ge;
 
+                $history->[$row - 1] = $text;
                 _send_message_to_all($self, 'row', row => $row, text => $text);
             }
         }
