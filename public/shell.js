@@ -3,7 +3,7 @@ function Shell(o) {
 
     self.rw = o.rw;
 
-    var container = $('#container');
+    var container = $('#shell-container');
     container.html('');
 
     container.html('Connecting...');
@@ -45,7 +45,6 @@ function Shell(o) {
     self.init = function() {
         container.html('');
 
-        container.append('<div class="menu"><a href="/">Reconnect</a> <a href="#" id="disconnect">Disconnect</a></div>');
         if (self.rw) {
             container.append('<div id="shell"></div>');
         }
@@ -60,15 +59,11 @@ function Shell(o) {
             spaces = spaces + "&nbsp;";
         }
 
+        shell.append('<div class="row space">' + spaces + '</div>');
         for (var i = 1; i <= 24; i++) {
             shell.append('<div class="row" id="row' + i + '">&nbsp;</div>');
         }
         shell.append('<div class="row space">' + spaces + '</div>');
-
-        $('#disconnect').click(function () {
-            self.ws.close();
-            return false;
-        });
 
         if (self.rw) {
             self.bind();

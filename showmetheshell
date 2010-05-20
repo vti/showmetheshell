@@ -593,30 +593,41 @@ Forbidden
 Sorry. Too many users are connected.
 
 @@ index.html.ep
-Welcome!
+% layout 'wrapper';
+<div id="login">
+<h2>ShowMeTheShell</h2>
 <form method="post">
+Login<br />
 <input name="username" /><br />
-<input type="password" name="password" />
-<input type="submit" value="Login" />
+Password<br />
+<input type="password" name="password" /><br />
+<br />
+<input type="submit" value="Let me in!" />
 </form>
+</div>
 
 @@ shell.html.ep
 % layout 'wrapper';
-Please, enable JavaScript.<br /><br />
+        <div id="menu">
+            clients: <span id="clients">n/a</span>
+            <form method="post" action="/logout">
+            <%= $user->{username} %> / <%= $user->{rw} ? 'read write' : 'read only' %>
+% if ($user->{is_admin}) {
+            <a href="<%= url_for 'admin' %>">admin</a>
+% }
+            <input type="submit" value="Logout" />
+            </form>
+        </div>
 
-If your browser doesn't support Websockets,<br />
-make sure you have Flash<br />
-installed. It is used as workaround.
+        <div id="shell-container">
+            Please, enable JavaScript.<br /><br />
 
-@@ layouts/wrapper.html.ep
-% my $user = stash 'user';
-<!doctype html><html>
-    <head>
-        <title>Shell</title>
-        <link rel="stylesheet" href="/styles.css" type="text/css" />
-        <script type="text/javascript" src="/jquery.min.js"></script>
-        <script type="text/javascript" src="/jquery.json.min.js"></script>
-        <script type="text/javascript" src="/shell.js"></script>
+            If your browser doesn't support Websockets,<br />
+            make sure you have Flash<br />
+            installed. It is used as workaround.
+        </div>
+
+%{ stash js =>
         <script type="text/javascript">
             // Only load the flash fallback when needed
             if (!('WebSocket' in window)) {
@@ -640,28 +651,23 @@ installed. It is used as workaround.
                 });
             });
         </script>
+%}
+
+@@ layouts/wrapper.html.ep
+<!doctype html><html>
+    <head>
+        <title>ShowMeTheShell</title>
+        <link rel="stylesheet" href="/styles.css" type="text/css" />
+        <script type="text/javascript" src="/jquery.min.js"></script>
+        <script type="text/javascript" src="/jquery.json.min.js"></script>
+        <script type="text/javascript" src="/shell.js"></script>
+        <%== stash('js')->() if stash 'js' %>
     </head>
     <body>
-        <div class="right">
-            <form method="post" action="/logout">
-            <%= $user->{username} %> / <%= $user->{rw} ? 'read write' : 'read only' %>
-% if ($user->{is_admin}) {
-            <a href="<%= url_for 'admin' %>">admin</a>
-% }
-            <input type="submit" value="Logout" />
-            </form>
-        </div>
-        <div id="status">
-            clients: <span id="clients">n/a</span>
-        </div>
-        <div class="container">
-            <table border="0" height="100%" style="margin:auto">
-            <tr><td style="vertical-align:middle">
-                <div id="container">
-                    <%== content %>
-                </div>
-            </td></tr>
-            </table>
+        <div id="container">
+            <div id="content">
+                <%= content %>
+            </div>
         </div>
     </body>
 </html>

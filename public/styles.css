@@ -1,14 +1,91 @@
+html, body {
+    font: 12px "Lucida Grande", "Trebuchet MS", Verdana, sans-serif;
+    margin:0px;
+    padding:0px;
+    overflow:hidden;
+    background:#ccc;
+}
+
+div#container {
+}
+
+div#content {
+}
+
+div#login {
+    margin:100px auto;
+    padding:2em;
+
+    color:#ccc;
+    background:#000;
+
+    line-height:240%;
+
+    text-align:center;
+
+    width:200px;
+
+    border-radius: 20px;
+    -moz-border-radius: 20px;
+    -webkit-border-radius: 20px;
+
+    /* For IE 5.5 - 7 */
+    filter: progid:DXImageTransform.Microsoft.Shadow(Strength=10, Direction=135, Color='#000000');
+    /* For IE 8 */
+    -ms-filter: "progid:DXImageTransform.Microsoft.Shadow(Strength=10, Direction=135, Color='#000000')";
+
+    /* Firefox */
+    -moz-box-shadow: 3px 3px 10px #000;
+    /* WebKit */
+    -webkit-box-shadow: 3px 3px 10px #000;
+    /* Standard */
+    box-shadow: 3px 3px 10px #000;
+}
+
+#login input {
+    width:100%;
+    font-size:20px;
+    background:#ccc;
+}
+
+#login input[type=submit] {
+    width: 50%;
+    font-size:12px;
+}
+
+#shell-container {
+    display:table;
+    margin:2em auto;
+
+    color:#fff;
+
+    padding:1em;
+    background:black;
+
+    border-radius: 20px;
+    -moz-border-radius: 20px;
+    -webkit-border-radius: 20px;
+
+    /* For IE 5.5 - 7 */
+    filter: progid:DXImageTransform.Microsoft.Shadow(Strength=10, Direction=135, Color='#000000');
+    /* For IE 8 */
+    -ms-filter: "progid:DXImageTransform.Microsoft.Shadow(Strength=10, Direction=135, Color='#000000')";
+
+    /* Firefox */
+    -moz-box-shadow: 3px 3px 10px #000;
+    /* WebKit */
+    -webkit-box-shadow: 3px 3px 10px #000;
+    /* Standard */
+    box-shadow: 3px 3px 10px #000;
+}
+
 #shell {
     padding:0.5em;
     background:black;
 }
 
-#status {
-    position:absolute;
-    top:0px;
-    left:0px;
-    background:black;
-    color:white;
+#menu {
+    text-align:right;
     padding:0.5em;
 }
 
