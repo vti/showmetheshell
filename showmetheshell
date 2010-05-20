@@ -239,9 +239,7 @@ get '/shell' => sub {
 sub _render_forbidden {
     my $self = shift;
 
-    $self->res->code(403);
-
-    $self->render('forbidden');
+    $self->render('forbidden', status => 403);
 }
 
 sub _render_limit_reached {
