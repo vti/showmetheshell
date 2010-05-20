@@ -23,6 +23,7 @@ my $loop = Mojo::IOLoop->singleton;
 my $clients = {};
 my $vt;
 my $pty;
+my $shell_pid;
 
 my $history = [];
 
@@ -77,6 +78,11 @@ websocket '/' => sub {
                 my $buffer;
 
                 my $code = $message->{code};
+
+                if ($code == 3) {
+                    kill 'INT', $shell_pid;
+                    return;
+                }
 
                 warn "code=$code";
 
@@ -422,7 +428,7 @@ sub _vt_new {
     }
     $pty->autoflush();
 
-    my $pid = _spawn_shell($vt, $pty, $config->{shell});
+    $shell_pid = _spawn_shell($vt, $pty, $config->{shell});
 
     app->log->debug("Setup Terminal callbacks");
 
@@ -454,7 +460,7 @@ sub _vt_new {
 
             $poll->poll(0);
 
-            return $self->finish if (waitpid ($pid, &WNOHANG) > 0);
+            return $self->finish if (waitpid ($shell_pid, &WNOHANG) > 0);
 
             if (my @read = $poll->handles(POLLIN)) {
                 my $nr = $pty->sysread(my $chunk, 1024);
