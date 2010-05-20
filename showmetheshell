@@ -19,11 +19,12 @@ use IO::Poll qw/POLLIN/;
 
 @ARGV = qw/daemon/ unless @ARGV;
 
-my $loop = Mojo::IOLoop->singleton;
+my $loop    = Mojo::IOLoop->singleton;
 my $clients = {};
 my $vt;
 my $pty;
 my $shell_pid;
+my $changedrows = {};
 
 my $history = [];
 
@@ -133,11 +134,12 @@ websocket '/' => sub {
 
             delete $clients->{$id};
 
-            _send_message_to_all($self, 'status', clients => scalar keys %$clients);
+            _send_message_to_all($self, 'status',
+                clients => scalar keys %$clients);
 
             # Last client disconnected
             if (!%$clients) {
-                $loop->tick_cb(sub {});
+                $loop->tick_cb(sub { });
                 undef $vt;
                 undef $pty;
             }
@@ -194,7 +196,7 @@ get '/admin' => sub {
 
     return _render_forbidden($self) unless _is_admin($self);
 
-    my $json = Mojo::JSON::Any->new;
+    my $json        = Mojo::JSON::Any->new;
     my $json_config = $json->encode($config);
 
     $self->stash(json_config => $json_config);
@@ -297,7 +299,7 @@ sub _get_user {
     my $self = shift;
 
     my $username = $self->session->{username};
-    my $user = $config->{users}->{$username};
+    my $user     = $config->{users}->{$username};
 
     $user->{username} = $username;
 
@@ -433,16 +435,16 @@ sub _vt_new {
 
             if ($type eq 'OUTPUT') {
 
-                $pty->syswrite ($arg1, length $arg1);
+                $pty->syswrite($arg1, length $arg1);
             }
-        } => $pty
+          } => $pty
     );
 
-    my $changedrows = {};
     $vt->callback_set('ROWCHANGE',   \&_vt_rowchange, $changedrows);
     $vt->callback_set('CLEAR',       \&_vt_changeall, $changedrows);
     $vt->callback_set('SCROLL_UP',   \&_vt_changeall, $changedrows);
     $vt->callback_set('SCROLL_DOWN', \&_vt_changeall, $changedrows);
+    $vt->callback_set('GOTO',        \&_vt_cursormove);
 
     my $poll = IO::Poll->new;
     my $fh = IO::Handle->new_from_fd($pty->fileno, 'r');
@@ -455,7 +457,7 @@ sub _vt_new {
 
             $poll->poll(0);
 
-            return $self->finish if (waitpid ($shell_pid, &WNOHANG) > 0);
+            return $self->finish if (waitpid($shell_pid, &WNOHANG) > 0);
 
             if (my @read = $poll->handles(POLLIN)) {
                 my $nr = $pty->sysread(my $chunk, 1024);
@@ -464,7 +466,7 @@ sub _vt_new {
 
                 if ((defined $nr) && ($nr > 0)) {
                     $vt->process($chunk);
-                    syswrite STDERR, $chunk if (! -t STDERR);
+                    syswrite STDERR, $chunk if (!-t STDERR);
                 }
             }
 
@@ -488,7 +490,11 @@ sub _vt_new {
                 $text =~ s/$esc\[(.*?)m/&_insert_color($1)/ge;
 
                 $history->[$row - 1] = $text;
-                _send_message_to_all($self, 'row', row => $row, text => $text);
+                _send_message_to_all(
+                    $self, 'row',
+                    row  => $row,
+                    text => $text
+                );
             }
         }
     );
@@ -510,6 +516,12 @@ sub _vt_changeall {
     }
 }
 
+sub _vt_cursormove {
+    my ($vtobject, $type, $arg1, $arg2) = @_;
+
+    warn "$arg1 x $arg2";
+}
+
 sub _spawn_shell {
     my ($vt, $pty, $cmd) = @_;
 
@@ -518,6 +530,7 @@ sub _spawn_shell {
         die "Cannot fork: $!";
     }
     elsif ($pid == 0) {
+
         # Child process - set up stdin/out/err and run the command.
 
         # Become process group leader.
@@ -526,7 +539,7 @@ sub _spawn_shell {
         }
 
         # Get details of the slave side of the pty.
-        my $tty = $pty->slave();
+        my $tty      = $pty->slave();
         my $tty_name = $tty->ttyname();
 
         $tty->set_raw();
@@ -675,6 +688,7 @@ framework.
  * CTRL keys (^D, ^C, ^L, ^W etc)
  * Tab key
  * Arrow keys
+ * Esc
  * Colors
 
 =back

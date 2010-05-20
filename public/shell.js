@@ -35,9 +35,6 @@ function Shell(o) {
         else if (type == 'row') {
             self.updateRow(data.row, data.text);
         }
-        else if (type == 'cursor') {
-            //updateCursor(data.row, data.col);
-        }
     };
 
     self.ws.onclose = function() {
@@ -148,10 +145,4 @@ function Shell(o) {
         var row = $('#row' + n);
         row.html(data);
     };
-
-    //function updateCursor(r, c) {
-    //    //var row = $('#row' + r);
-    //    //row.append('<span class="cursor">&nbsp;</span>');
-    //    //alert('cursor!');
-    //}
 }
