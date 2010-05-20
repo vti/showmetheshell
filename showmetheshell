@@ -486,6 +486,9 @@ sub _vt_new {
                 $text =~ s/$d0$d0/$d0/g;
                 $text = Mojo::ByteStream->new($text)->decode('UTF-8');
 
+                $text =~ s/'/"/g;
+                $text = Mojo::ByteStream->new($text)->xml_escape;
+
                 my $esc = pack('C', 0x1B);
 
                 $text =~ s/\s+$//g;
