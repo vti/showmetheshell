@@ -100,8 +100,8 @@ function Shell(o) {
             }
 
             // Pass arrows
-            if (!e.shiftKey && (code >= 37 && code <= 40)) {
-                return;
+            if (!e.shiftKey && e.keyCode && (code >= 37 && code <= 40)) {
+                return false;
             }
 
             // Unicode?
