@@ -79,11 +79,6 @@ websocket '/' => sub {
 
                 my $code = $message->{code};
 
-                if ($code == 3) {
-                    kill 'INT', $shell_pid;
-                    return;
-                }
-
                 warn "code=$code";
 
                 if ($code < 128) {
@@ -477,10 +472,6 @@ sub _vt_new {
                 my $text = $vt->row_sgrtext($row);
                 delete $changedrows->{$row};
 
-                #use Data::Hexdumper 'hexdump';
-
-                #warn hexdump $text;
-
                 # Hack!!1
                 my $d0 = pack('C', 0xd0);
                 $text =~ s/$d0$d0/$d0/g;
@@ -537,6 +528,11 @@ sub _spawn_shell {
         # Get details of the slave side of the pty.
         my $tty = $pty->slave();
         my $tty_name = $tty->ttyname();
+
+        $tty->set_raw();
+        $pty->set_raw();
+
+        $pty->make_slave_controlling_terminal();
 
         # File descriptor shuffling - close the pty master, then close
         # stdin/out/err and reopen them to point to the pty slave.
