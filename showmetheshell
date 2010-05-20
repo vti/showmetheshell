@@ -114,7 +114,7 @@ websocket '/' => sub {
                 if ($action eq 'left') {
                     $buffer = "$esc\[D";
                 }
-                elsif ($action eq 'top') {
+                elsif ($action eq 'up') {
                     $buffer = "$esc\[A";
                 }
                 elsif ($action eq 'right') {
