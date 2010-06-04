@@ -605,6 +605,9 @@ Password<br />
 <input type="submit" value="Let me in!" />
 </form>
 </div>
+<script type="text/javascript">
+$("input[name$='username']").focus();
+</script> 
 
 @@ shell.html.ep
 % layout 'wrapper';
