@@ -1,16 +1,16 @@
+Showmetheshell installation steps:
 
-To install ShowMeTheShell you should do:
+    git clone --recursive http://github.com/vti/showmetheshell.git
+    sudo cpan -i IO::Pty Term::VT102
+    cd showmetheshell
+    perl showmetheshell
 
-mkdir showmetheshell
-cd showmetheshell/
-git clone http://github.com/vti/showmetheshell.git .
-git submodule init
-git submodule update
-sudo cpan -i IO::Pty
-sudo cpan -i Term::VT102
-perl showmetheshell
+If non websocket aware browser is used, flash policy server must be started:
 
-After that the system will be avaliable at http://localhost:3000
+    sudo perl mojo/examples/flash-policy-server.p&
 
-The login and password you can find in the beginnig of the file "showmetheshell".
+Point your browser to http://127.0.0.1:3000 (localhost doesn't work
+under Chrome).
 
+The default login and password can be found at the beginnig of the
+"showmetheshell" file.
