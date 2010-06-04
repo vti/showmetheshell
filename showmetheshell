@@ -8,7 +8,7 @@ use lib "$FindBin::Bin/mojo-json-any/lib";
 
 use Mojolicious::Lite;
 use Mojo::JSON::Any;
-use Mojo::ByteStream;
+use Mojo::ByteStream 'b';
 
 use Term::VT102;
 use IO::Handle;
@@ -376,7 +376,11 @@ sub _message_to_json {
     my %message = @_;
 
     my $json = Mojo::JSON::Any->new;
-    return $json->encode({%message});
+    my $message = $json->encode({%message});
+
+    $message = b($message)->decode('UTF-8');
+
+    return $message;
 }
 
 sub _send_message {
