@@ -37,7 +37,7 @@ my $config = plugin 'json_config' => {
             user  => {password => 'resu', rw => 1},
             guest => {password => 'guest'}
         },
-        max_clients => 0
+        max_clients => 10
     }
 };
 
@@ -634,7 +634,14 @@ $("input[name$='username']").focus();
             installed. It is used as workaround.
         </div>
 
-%{ stash js =>
+@@ layouts/wrapper.html.ep
+<!doctype html><html>
+    <head>
+        <title>ShowMeTheShell</title>
+        <link rel="stylesheet" href="/styles.css" type="text/css" />
+        <script type="text/javascript" src="/jquery.min.js"></script>
+        <script type="text/javascript" src="/jquery.json.min.js"></script>
+        <script type="text/javascript" src="/shell.js"></script>
         <script type="text/javascript">
             // Only load the flash fallback when needed
             if (!('WebSocket' in window)) {
@@ -651,24 +658,16 @@ $("input[name$='username']").focus();
                 WebSocket.__swfLocation = '/web-socket-js/WebSocketMain.swf';
             }
 
+% my $user = stash 'user';
+% my $rw = $user->{rw} if $user;
+
             $(document).ready(function() {
                 var shell = new Shell({
                     "url" : "<%= stash 'websocket_url' %>",
-                    "rw" : <%= $user->{rw} ? 1 : 0 %>
+                    "rw"  : <%= $rw %>
                 });
             });
         </script>
-%}
-
-@@ layouts/wrapper.html.ep
-<!doctype html><html>
-    <head>
-        <title>ShowMeTheShell</title>
-        <link rel="stylesheet" href="/styles.css" type="text/css" />
-        <script type="text/javascript" src="/jquery.min.js"></script>
-        <script type="text/javascript" src="/jquery.json.min.js"></script>
-        <script type="text/javascript" src="/shell.js"></script>
-        <%== stash('js')->() if stash 'js' %>
     </head>
     <body>
         <div id="container">
