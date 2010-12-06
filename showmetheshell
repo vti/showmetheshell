@@ -5,14 +5,15 @@ use warnings;
 
 use FindBin;
 
-#use lib "$FindBin::Bin/contrib/reanimator/lib";
-use lib "/Users/vti/dev/reanimator/lib";
+BEGIN {
+    use lib "$FindBin::Bin/contrib/protocol-websocket/lib";
+    use lib "$FindBin::Bin/contrib/event_reactor/lib";
+    use lib "$FindBin::Bin/contrib/reanimator/lib";
+}
 
 use lib 'lib';
 
 #use constant DEBUG => !!$ENV{SHOWMETHESHELL_DEBUG};
-
-#BEGIN {$ENV{EVENT_REACTOR_DEBUG} = 1};
 
 use JSON;
 use ReAnimator;
@@ -36,10 +37,8 @@ ReAnimator->new(
                         {type => 'row', row => $row, text => $text}
                     )
                 );
-                warn 'row changed';
             },
             on_finished => sub {
-                warn 'terminal is closed';
                 $self->drop($client);
             }
         );
@@ -52,8 +51,6 @@ ReAnimator->new(
             sub {
                 my ($client, $message) = @_;
 
-                #warn "Message from client $message" if DEBUG;
-
                 my $json = JSON->new;
 
                 eval { $message = $json->decode($message); };
@@ -65,11 +62,10 @@ ReAnimator->new(
 
                     my $code = $message->{code};
 
-                    warn "code=$code";
-
                     $terminal->key($code);
                 }
                 elsif ($type eq 'action') {
+                    $terminal->move($message->{action});
                 }
                 else {
                     warn "Unknown type '$type'";
