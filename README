@@ -1,4 +1,4 @@
-HTML5 WebSocket Shell on top of Mojolicious
+HTML5 WebSocket Shell
 
 See screenshots here
 http://github.com/vti/showmetheshell/tree/master/screenshots
@@ -16,8 +16,6 @@ Prerequisites:
 
  * IO::Pty
  * Term::VT102
- * Mojo
- * Mojo::JSON::Any
 
 TODO:
 

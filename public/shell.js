@@ -1,56 +1,16 @@
 function Shell(o) {
     var self = this;
 
-    self.rw = o.rw;
-
-    var container = $('#shell-container');
+    var container = $('#container');
     container.html('');
 
-    container.html('Connecting...');
-
-    self.ws = new WebSocket(o.url);
-
-    self.ws.onerror = function(e) {
-        container.html("Error: " + e);
+    self.close = function() {
     };
-
-    self.ws.onopen = function() {
-        container.html('Connected. Loading...');
-
-        self.init();
-    };
-
-    self.ws.onmessage = function(e) {
-        var data = $.evalJSON(e.data);
-        var type = data.type;
-
-        if (type == 'status') {
-            $('#clients').html(data.clients);
-        }
-        else if (type == 'history') {
-            for (var i = 0; i < data.history.length; i++) {
-                self.updateRow(i + 1, data.history[i]);
-            }
-        }
-        else if (type == 'row') {
-            self.updateRow(data.row, data.text);
-        }
-    };
-
-    self.ws.onclose = function() {
-        container.html('Disconnected. <a href="/">Reconnect</a>');
-        $('#clients').html('n/a');
-    }
 
     self.init = function() {
         container.html('');
 
-        if (self.rw) {
-            container.append('<div id="shell"></div>');
-        }
-        else {
-            container.append('<div id="shell" class="readonly"></div>');
-        }
+        container.append('<div id="shell"></div>');
 
         var shell = $('#shell');
 
@@ -65,9 +25,7 @@ function Shell(o) {
         }
         shell.append('<div class="row space">' + spaces + '</div>');
 
-        if (self.rw) {
-            self.bind();
-        }
+        self.bind();
     };
 
     self.bind = function() {
@@ -133,7 +91,7 @@ function Shell(o) {
     };
 
     self.sendMessage = function (message) {
-        self.ws.send($.toJSON(message));
+        self.onsend($.toJSON(message));
     };
 
     self.updateRow = function(n, data) {

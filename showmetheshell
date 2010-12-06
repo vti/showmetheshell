@@ -1,725 +1,81 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 
-# Copyright (C) 2010, Viacheslav Tykhanovskyi
+use strict;
+use warnings;
 
 use FindBin;
-use lib "$FindBin::Bin/mojo/lib";
-use lib "$FindBin::Bin/mojo-json-any/lib";
 
-use Mojolicious::Lite;
-use Mojo::JSON::Any;
-use Mojo::ByteStream 'b';
+#use lib "$FindBin::Bin/contrib/reanimator/lib";
+use lib "/Users/vti/dev/reanimator/lib";
 
-use Term::VT102;
-use IO::Handle;
-use POSIX ':sys_wait_h';
-use IO::Pty;
+use lib 'lib';
 
-use IO::Poll qw/POLLIN/;
+#use constant DEBUG => !!$ENV{SHOWMETHESHELL_DEBUG};
 
-@ARGV = qw/daemon/ unless @ARGV;
+#BEGIN {$ENV{EVENT_REACTOR_DEBUG} = 1};
 
-my $loop    = Mojo::IOLoop->singleton;
-my $clients = {};
-my $vt;
-my $pty;
-my $shell_pid;
-my $changedrows = {};
+use JSON;
+use ReAnimator;
+use Terminal;
 
-my $history = [];
+$SIG{INT} = $SIG{TERM} = sub { exit 0 };
 
-my $config = plugin 'json_config' => {
-    default => {
-        shell  => '/bin/sh',
-        secret => 'Show me the code',
-        users  => {
-            root  => {password => 'toor', rw => 1, is_admin => 1},
-            user  => {password => 'resu', rw => 1},
-            guest => {password => 'guest'}
-        },
-        max_clients => 10
-    }
-};
+my $server = ReAnimator->new;
 
-app->secret($config->{secret});
+ReAnimator->new(
+    on_accept => sub {
+        my ($self, $client) = @_;
 
-websocket '/' => sub {
-    my $self = shift;
-    my $tx   = $self->tx;
+        my $terminal = Terminal->new(
+            cmd            => '/bin/sh',
+            on_row_changed => sub {
+                my ($self, $row, $text) = @_;
 
-    return $self->finish unless _is_allowed($self);
+                $client->send_message(
+                    JSON->new->encode(
+                        {type => 'row', row => $row, text => $text}
+                    )
+                );
+                warn 'row changed';
+            },
+            on_finished => sub {
+                warn 'terminal is closed';
+                $self->drop($client);
+            }
+        );
 
-    return $self->finish if _is_limit_reached($self);
+        $self->event_reactor->add_atom($terminal);
 
-    app->log->debug("Client connected");
+        $terminal->start;
 
-    my $id = "$tx";
+        $client->on_message(
+            sub {
+                my ($client, $message) = @_;
 
-    $clients->{$id} = $tx;
+                #warn "Message from client $message" if DEBUG;
 
-    _send_message_to_all($self, 'status', clients => scalar keys %$clients);
+                my $json = JSON->new;
 
-    my $user = _get_user($self);
+                eval { $message = $json->decode($message); };
+                return if !$message || $@;
 
-    $vt ||= _vt_new($self);
+                my $type = $message->{type};
+                if ($type eq 'key') {
+                    my $buffer;
 
-    _send_message($self, 'history', history => $history);
+                    my $code = $message->{code};
 
-    $self->receive_message(
-        sub {
-            my ($self, $message) = @_;
+                    warn "code=$code";
 
-            return unless _is_allowed_to_write($self);
-
-            $message = _json_to_message($message);
-            return unless $message;
-
-            my $type = $message->{type};
-            if ($type eq 'key') {
-                my $buffer;
-
-                my $code = $message->{code};
-
-                warn "code=$code";
-
-                if ($code < 128) {
-                    $buffer = pack('C', $code);
+                    $terminal->key($code);
                 }
-                elsif ($code > 128 && $code < 2048) {
-                    my $one = ($code >> 6) | 192;
-                    my $two = ($code & 63) | 128;
-                    $buffer = pack('CC', $one, $two);
+                elsif ($type eq 'action') {
                 }
                 else {
-                    my $one   = (($code >> 12) | 224);
-                    my $two   = ((($code >> 6) & 63) | 128);
-                    my $three = (($code & 63) | 128);
-                    $buffer = pack('CCC', $one, $two, $three);
+                    warn "Unknown type '$type'";
                 }
 
-                $pty->syswrite($buffer, length $buffer);
             }
-            elsif ($type eq 'action') {
-                my $action = $message->{action};
-
-                warn "action=$action";
-
-                my $esc = pack('C', 0x1B);
-
-                my $buffer;
-                if ($action eq 'left') {
-                    $buffer = "$esc\[D";
-                }
-                elsif ($action eq 'up') {
-                    $buffer = "$esc\[A";
-                }
-                elsif ($action eq 'right') {
-                    $buffer = "$esc\[C";
-                }
-                elsif ($action eq 'down') {
-                    $buffer = "$esc\[B";
-                }
-
-                $pty->syswrite($buffer, length $buffer);
-            }
-            else {
-                warn "Unknown type '$type'";
-            }
-        }
-    );
-
-    $self->finished(
-        sub {
-            app->log->debug('Client disconnected');
-
-            delete $clients->{$id};
-
-            _send_message_to_all($self, 'status',
-                clients => scalar keys %$clients);
-
-            # Last client disconnected
-            if (!%$clients) {
-                $loop->tick_cb(sub { });
-                undef $vt;
-                undef $pty;
-            }
-        }
-    );
-};
-
-get '/' => sub {
-    my $self = shift;
-
-    return $self->redirect_to('shell') if _is_allowed($self);
-} => 'index';
-
-post '/' => sub {
-    my $self = shift;
-
-    my $username = $self->param('username');
-    my $password = $self->param('password');
-
-    my $ok =
-         $username
-      && $password
-      && $config->{users}->{$username}
-      && $config->{users}->{$username}->{password} eq $password;
-
-    return _render_forbidden($self) unless $ok;
-
-    $self->session(username => $username);
-
-    return $self->redirect_to('shell');
-} => 'index';
-
-# Anything below needs authentication
-ladder sub {
-    my $self = shift;
-
-    _render_forbidden($self), return 0 unless _is_allowed($self);
-
-    _render_limit_reached($self), return 0 if _is_limit_reached($self);
-
-    return 1;
-};
-
-post '/logout' => sub {
-    my $self = shift;
-
-    _logout($self);
-
-    return $self->redirect_to('index');
-};
-
-get '/admin' => sub {
-    my $self = shift;
-
-    return _render_forbidden($self) unless _is_admin($self);
-
-    my $json        = Mojo::JSON::Any->new;
-    my $json_config = $json->encode($config);
-
-    $self->stash(json_config => $json_config);
-} => 'admin';
-
-post '/admin' => sub {
-    my $self = shift;
-
-    return _render_forbidden($self) unless _is_admin($self);
-
-    my $json_config = $self->param('json_config');
-
-    my $conf = File::Basename::basename($0) . '.json';
-    $conf = app->home->rel_file($conf);
-
-    open(my $file, '>', $conf) or return $self->render_exception($!);
-    print $file $json_config;
-    close $file;
-
-    if ($self->param('save-and-reload')) {
-        $config = app->plugins->load_plugin(app, 'json_config');
-
-        foreach my $id (keys %$clients) {
-            $clients->{$id}->finish;
-        }
+        );
     }
-
-    return $self->redirect_to('admin');
-} => 'admin';
-
-get '/shell' => sub {
-    my $self = shift;
-
-    my $url = $self->req->url->base->clone;
-    $url->scheme($self->req->is_secure ? 'wss' : 'ws');
-    $url->query->params([]);
-
-    $self->stash(websocket_url => $url->to_abs);
-
-    $self->stash(user => _get_user($self));
-} => 'shell';
-
-sub _render_forbidden {
-    my $self = shift;
-
-    $self->render('forbidden', status => 403);
-}
-
-sub _render_limit_reached {
-    my $self = shift;
-
-    $self->render('limit_reached');
-}
-
-sub _is_allowed {
-    my $self = shift;
-
-    my $username = $self->session->{username};
-    return unless $username;
-
-    return unless $config->{users}->{$username};
-
-    return 1;
-}
-
-sub _is_admin {
-    my $self = shift;
-
-    my $user = _get_user($self);
-    return unless $user->{is_admin};
-
-    return 1;
-}
-
-sub _is_allowed_to_write {
-    my $self = shift;
-
-    return 1 if _is_admin($self);
-
-    my $user = _get_user($self);
-    return unless $user->{rw};
-
-    return 1;
-}
-
-sub _is_limit_reached {
-    my $self = shift;
-
-    # No limit
-    return 0 unless defined $config->{max_clients};
-
-    # Admin can always connect
-    return 0 if _is_admin($self);
-
-    # Not yet connected, that's why +1
-    return (scalar keys %$clients) + 1 > $config->{max_clients};
-}
-
-sub _get_user {
-    my $self = shift;
-
-    my $username = $self->session->{username};
-    my $user     = $config->{users}->{$username};
-
-    $user->{username} = $username;
-
-    return $user;
-}
-
-sub _logout {
-    my $self = shift;
-
-    delete $self->session->{username};
-}
-
-sub _insert_color {
-    my $color = shift;
-
-    my %colors = (
-        0 => 'reset',
-        1 => 'bright',
-        2 => 'dim',
-        4 => 'underscore',
-        5 => 'blink',
-        7 => 'reverse',
-        8 => 'hidden',
-
-        # Foreground Colours
-        30 => 'fg-black',
-        31 => 'fg-red',
-        32 => 'fg-green',
-        33 => 'fg-yellow',
-        34 => 'fg-blue',
-        35 => 'fg-magenta',
-        36 => 'fg-cyan',
-        37 => 'fg-white',
-
-        # Background Colours
-        40 => 'bg-black',
-        41 => 'bg-red',
-        42 => 'bg-green',
-        43 => 'bg-yellow',
-        44 => 'bg-blue',
-        45 => 'bg-magenta',
-        46 => 'bg-cyan',
-        47 => 'bg-white',
-    );
-
-    my @attrs = split ';' => $color;
-
-    my $string = '';
-    foreach my $attr (@attrs) {
-        if (my $class = $colors{$attr}) {
-            $string .= '</span>' if $class eq 'reset';
-
-            $string .= qq/<span class="$class">/;
-
-            $string .= '</span>' if $class eq 'reset';
-        }
-    }
-
-    return $string;
-}
-
-sub _json_to_message {
-    my $message = shift;
-
-    my $json = Mojo::JSON::Any->new;
-
-    $message = $json->decode($message);
-    return unless $message || $json->error;
-
-    return $message;
-}
-
-sub _message_to_json {
-    my %message = @_;
-
-    my $json = Mojo::JSON::Any->new;
-    my $message = $json->encode({%message});
-
-    $message = b($message)->decode('UTF-8');
-
-    return $message;
-}
-
-sub _send_message {
-    my $self = shift;
-    my $type = shift;
-
-    my $json = _message_to_json(type => $type, @_);
-    $json = Mojo::ByteStream->new($json)->decode('UTF-8');
-    $self->send_message($json);
-}
-
-sub _send_message_to_all {
-    my $self = shift;
-    my $type = shift;
-
-    my $json = _message_to_json(type => $type, @_);
-
-    foreach my $id (keys %$clients) {
-        my $client = $clients->{$id};
-        next unless $client;
-
-        $client->send_message($json);
-    }
-}
-
-sub _vt_new {
-    my $self = shift;
-
-    app->log->debug("Creating VT102");
-
-    $vt = Term::VT102->new('cols' => 80, 'rows' => 24);
-
-    # Convert linefeeds to linefeed + carriage return.
-    $vt->option_set('LFTOCRLF', 1);
-
-    # Make sure line wrapping is switched on.
-    $vt->option_set('LINEWRAP', 1);
-
-    app->log->debug("Creating Pty");
-
-    $pty = new IO::Pty;
-
-    my $tty_name = $pty->ttyname();
-    if (not defined $tty_name) {
-        die "Could not assign a pty";
-    }
-    $pty->autoflush();
-
-    $shell_pid = _spawn_shell($vt, $pty, $config->{shell});
-
-    app->log->debug("Setup Terminal callbacks");
-
-    $vt->callback_set(
-        'OUTPUT' => sub {
-            my ($vtobject, $type, $arg1, $arg2, $private) = @_;
-
-            if ($type eq 'OUTPUT') {
-
-                $pty->syswrite($arg1, length $arg1);
-            }
-          } => $pty
-    );
-
-    $vt->callback_set('ROWCHANGE',   \&_vt_rowchange, $changedrows);
-    $vt->callback_set('CLEAR',       \&_vt_changeall, $changedrows);
-    $vt->callback_set('SCROLL_UP',   \&_vt_changeall, $changedrows);
-    $vt->callback_set('SCROLL_DOWN', \&_vt_changeall, $changedrows);
-    $vt->callback_set('GOTO',        \&_vt_cursormove);
-
-    my $poll = IO::Poll->new;
-    my $fh = IO::Handle->new_from_fd($pty->fileno, 'r');
-    $fh->blocking(0);
-    $poll->mask($fh => POLLIN);
-
-    $loop->tick_cb(
-        sub {
-            my $loop = shift;
-
-            $poll->poll(0);
-
-            return $self->finish if (waitpid($shell_pid, &WNOHANG) > 0);
-
-            if (my @read = $poll->handles(POLLIN)) {
-                my $nr = $pty->sysread(my $chunk, 1024);
-
-                return $self->finish if ((defined $nr) && ($nr == 0));
-
-                if ((defined $nr) && ($nr > 0)) {
-                    $vt->process($chunk);
-                    syswrite STDERR, $chunk if (!-t STDERR);
-                }
-            }
-
-            foreach my $row (sort keys %$changedrows) {
-                my $text = $vt->row_sgrtext($row);
-                delete $changedrows->{$row};
-
-                # Hack!!1
-                my $d0 = pack('C', 0xd0);
-                $text =~ s/$d0$d0/$d0/g;
-                $text = Mojo::ByteStream->new($text)->decode('UTF-8');
-
-                $text = Mojo::ByteStream->new($text)->xml_escape;
-
-                my $esc = pack('C', 0x1B);
-
-                $text =~ s/\s+$//g;
-                $text = ' ' if $text eq '';
-                $text =~ s/ /&nbsp;/g;
-
-                $text =~ s/$esc\[(.*?)m/&_insert_color($1)/ge;
-
-                $history->[$row - 1] = $text;
-                _send_message_to_all(
-                    $self, 'row',
-                    row  => $row,
-                    text => $text
-                );
-            }
-        }
-    );
-
-    return $vt;
-}
-
-sub _vt_rowchange {
-    my ($vtobject, $type, $arg1, $arg2, $private) = @_;
-
-    $private->{$arg1} = time if (not exists $private->{$arg1});
-}
-
-sub _vt_changeall {
-    my ($vtobject, $type, $arg1, $arg2, $private) = @_;
-
-    for (my $row = 1; $row <= $vtobject->rows; $row++) {
-        $private->{$row} = 0;
-    }
-}
-
-sub _vt_cursormove {
-    my ($vtobject, $type, $arg1, $arg2) = @_;
-
-    warn "$arg1 x $arg2";
-}
-
-sub _spawn_shell {
-    my ($vt, $pty, $cmd) = @_;
-
-    my $pid = fork;
-    if (not defined $pid) {
-        die "Cannot fork: $!";
-    }
-    elsif ($pid == 0) {
-
-        # Child process - set up stdin/out/err and run the command.
-
-        # Become process group leader.
-        if (not POSIX::setsid()) {
-            warn "Couldn't perform setsid: $!";
-        }
-
-        # Get details of the slave side of the pty.
-        my $tty      = $pty->slave();
-        my $tty_name = $tty->ttyname();
-
-        $tty->set_raw();
-        $pty->set_raw();
-
-        $pty->make_slave_controlling_terminal();
-
-        # File descriptor shuffling - close the pty master, then close
-        # stdin/out/err and reopen them to point to the pty slave.
-        close($pty);
-        close(STDIN);
-        close(STDOUT);
-        open(STDIN, "<&" . $tty->fileno())
-          || die "Couldn't reopen " . $tty_name . " for reading: $!";
-        open(STDOUT, ">&" . $tty->fileno())
-          || die "Couldn't reopen " . $tty_name . " for writing: $!";
-        close(STDERR);
-        open(STDERR, ">&" . $tty->fileno())
-          || die "Couldn't redirect STDERR: $!";
-
-        # Set sane terminal parameters.
-        system 'stty sane';
-
-        # Set the terminal size with stty.
-        system 'stty rows ' . $vt->rows;
-        system 'stty cols ' . $vt->cols;
-
-        # Finally, run the command, and die if we can't.
-        exec $cmd;
-        die "Cannot exec '$cmd': $!";
-    }
-    else {
-        return $pid;
-    }
-}
-
-# see script/flash-policy-server
-#print
-#  "Remember, you need to also run script/flash-policy-server as root for this to work...\n";
-
-app->start;
-
-1;
-
-__DATA__
-
-@@ forbidden.html.ep
-Forbidden
-
-@@ limit_reached.html.ep
-Sorry. Too many users are connected.
-
-@@ index.html.ep
-% layout 'wrapper';
-<div id="login">
-<h2>ShowMeTheShell</h2>
-<form method="post">
-Login<br />
-<input name="username" /><br />
-Password<br />
-<input type="password" name="password" /><br />
-<br />
-<input type="submit" value="Let me in!" />
-</form>
-</div>
-<script type="text/javascript">
-$("input[name$='username']").focus();
-</script> 
-
-@@ shell.html.ep
-% layout 'wrapper';
-        <div id="menu">
-            clients: <span id="clients">n/a</span>
-            <form method="post" action="/logout">
-            <%= $user->{username} %> / <%= $user->{rw} ? 'read write' : 'read only' %>
-% if ($user->{is_admin}) {
-            <a href="<%= url_for 'admin' %>">admin</a>
-% }
-            <input type="submit" value="Logout" />
-            </form>
-        </div>
-
-        <div id="shell-container">
-            Please, enable JavaScript.<br /><br />
-
-            If your browser doesn't support Websockets,<br />
-            make sure you have Flash<br />
-            installed. It is used as workaround.
-        </div>
-
-@@ layouts/wrapper.html.ep
-<!doctype html><html>
-    <head>
-        <title>ShowMeTheShell</title>
-        <link rel="stylesheet" href="/styles.css" type="text/css" />
-        <script type="text/javascript" src="/jquery.min.js"></script>
-        <script type="text/javascript" src="/jquery.json.min.js"></script>
-        <script type="text/javascript" src="/shell.js"></script>
-        <script type="text/javascript">
-            // Only load the flash fallback when needed
-            if (!('WebSocket' in window)) {
-                document.write([
-                    '<scr'+'ipt type="text/javascript" src="/web-socket-js/swfobject.js"></scr'+'ipt>',
-                    '<scr'+'ipt type="text/javascript" src="/web-socket-js/FABridge.js"></scr'+'ipt>',
-                    '<scr'+'ipt type="text/javascript" src="/web-socket-js/web_socket.js"></scr'+'ipt>'
-                ].join(''));
-            }
-        </script>
-        <script type="text/javascript">
-            if (WebSocket.__initialize) {
-                // Set URL of your WebSocketMain.swf here:
-                WebSocket.__swfLocation = '/web-socket-js/WebSocketMain.swf';
-            }
-
-% my $user = stash 'user';
-% my $rw = $user->{rw} if $user;
-
-            $(document).ready(function() {
-                var shell = new Shell({
-                    "url" : "<%= stash 'websocket_url' %>",
-                    "rw"  : <%= $rw %>
-                });
-            });
-        </script>
-    </head>
-    <body>
-        <div id="container">
-            <div id="content">
-                <%= content %>
-            </div>
-        </div>
-    </body>
-</html>
-
-@@ admin.html.ep
-% my $json_config = param('json_config') || stash('json_config');
-<form method="post">
-<textarea name="json_config"><%= $json_config %></textarea><br />
-<input type="submit" name="save" value="Save" />
-<input type="submit" name="save-and-reload" value="Save and reload" />
-</form>
-
-__END__
-
-=head1 DESCRIPTION
-
-A HTML5 WebSocket Shell built on top of an amazing Mojolicious web
-framework.
-
-=head2 Features
-
-=over
-
- * CTRL keys (^D, ^C, ^L, ^W etc)
- * Tab key
- * Arrow keys
- * Esc
- * Colors
-
-=back
-
-=head1 DEVELOPMENT
-
-=head2 Repository
-
-    http://github.com/vti/showmetheshell
-
-=head1 AUTHOR
-
-Viacheslav Tykhanovskyi, C<vti@cpan.org>.
-
-=head1 COPYRIGHT AND LICENSE
-
-Copyright (C) 2010, Viacheslav Tykhanovskyi
-
-This program is free software, you can redistribute it and/or modify it under
-the terms of the Artistic License version 2.0.
-
-=cut
+)->listen->start;
