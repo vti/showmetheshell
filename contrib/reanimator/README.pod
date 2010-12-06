@@ -1,0 +1,8 @@
+=head1 ReAnimator
+
+Simple standalone single-process WebSocket server with Cookies and SSL support.
+
+    $ perl example/chat
+    Listening on localhost:3000
+
+Using Safari 5, Chrome or Firefox 4 open C<example/public/index.html> page and enjoy.

@@ -1,0 +1,68 @@
+#!/usr/bin/env perl
+
+# Inspired by http://github.com/xantus/mojo-websocket-examples.git
+
+use strict;
+use warnings;
+
+use FindBin;
+use lib "$FindBin::Bin/../lib";
+
+use ReAnimator;
+
+my $irc_server  = 'irc.perl.org';
+my $irc_port    = 6667;
+my $irc_channel = 'ru.pm';
+
+ReAnimator->new(
+    on_accept => sub {
+        my ($self, $client) = @_;
+
+        $client->send_message('Connecting to ' . $irc_server . '...');
+
+        # Raw connection without WebSocket handshake
+        my $slave = $self->event_reactor->connect(
+            address    => $irc_server,
+            port       => $irc_port,
+            on_connect => sub {
+                my $self = shift;
+
+                $self->write(_irc_nick_command());
+                $self->write(_irc_join_command($irc_channel));
+            },
+            on_disconnect => sub { $self->drop($client) },
+            on_read       => sub { shift; $client->send_message(@_) },
+            on_error      => sub { $self->drop($client) }
+        );
+
+        $client->on_message(
+            sub {
+                my ($client, $message) = @_;
+
+                if ($message =~ s{^/nick }{}) {
+                    $slave->write("nick $message\n");
+                }
+                elsif ($message =~ s{^/quit}{}) {
+                    $slave->write("quit\n");
+                }
+                elsif ($message =~ s{^/join #?}{}) {
+                    $irc_channel = $message;
+                    $slave->write("join $message\n");
+                }
+                else {
+                    $slave->write("privmsg #$irc_channel :$message\n");
+                    $client->send_message("$message\n");
+                }
+            }
+        );
+    }
+)->listen->start;
+
+sub _irc_nick_command {
+    my $rand = 'ReAnimator' . int(rand(10000));
+
+    return
+      "NICK $rand\nUSER reanimator reanimator-websocket 127.0.0.1 :reanimator-websocket user\n";
+}
+
+sub _irc_join_command {"JOIN #$_[0]\n"}
