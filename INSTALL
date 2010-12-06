@@ -1,13 +1,13 @@
 Showmetheshell installation steps:
 
     git clone http://github.com/vti/showmetheshell.git
-    sudo cpan -i IO::Pty Term::VT102
+    sudo cpan -i IO::Pty Term::VT102 JSON
     cd showmetheshell
     perl showmetheshell
 
 If non websocket aware browser is used, flash policy server must be started:
 
-    sudo perl mojo/examples/flash-policy-server.p&
+    sudo perl contrib/reanimator/examples/flash-policy-server.p&
 
 Point your browser to http://127.0.0.1:3000 (localhost doesn't work
 under Chrome).
