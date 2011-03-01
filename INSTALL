@@ -9,5 +9,4 @@ If non websocket aware browser is used, flash policy server must be started:
 
     sudo perl contrib/reanimator/examples/flash-policy-server.p&
 
-Point your browser to http://127.0.0.1:3000 (localhost doesn't work
-under Chrome).
+Point your browser to file://where/you/put/showmetheshell/public/index.html.
