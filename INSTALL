@@ -8,6 +8,6 @@ Showmetheshell installation steps:
 
 If a non websocket aware browser is used, flash policy server must be started:
 
-    sudo perl contrib/reanimator/examples/flash-policy-server.p&
+    sudo perl bin/flash-policy-server.p &
 
 Point your browser to http://localhost:5000/

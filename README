@@ -12,11 +12,6 @@ Features:
  * Colors
  * Unicode
 
-Prerequisites:
-
- * IO::Pty
- * Term::VT102
-
 TODO:
 
  * Cursor
