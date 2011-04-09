@@ -1,59 +1,54 @@
-#!/usr/bin/env perl
+package Handler;
 
 use strict;
 use warnings;
 
-use FindBin;
-
-BEGIN {
-    use lib 'lib';
-    use lib "$FindBin::Bin/contrib/protocol-websocket/lib";
-    use lib "$FindBin::Bin/contrib/event_reactor/lib";
-    use lib "$FindBin::Bin/contrib/reanimator/lib";
-}
+use Terminal;
+use Encode ();
+use JSON   ();
 
 my $ESCAPE = pack('C', 0x1B);
 
-use Encode;
-use JSON;
-use ReAnimator;
-use Terminal;
+sub new {
+    my $class = shift;
 
-$SIG{INT} = $SIG{TERM} = sub { exit 0 };
+    my $self = {};
+    bless $self, $class;
 
-my $server = ReAnimator->new;
+    return $self;
+}
 
-ReAnimator->new(
-    on_accept => sub {
-        my ($self, $client) = @_;
+sub run {
+    my $handler = shift;
+
+    my $cmd = $handler->{cmd};
+
+    return sub {
+        my $self = shift;
 
         my $terminal = Terminal->new(
-            cmd            => '/bin/sh',
+            cmd            => $cmd,
             on_row_changed => sub {
-                my ($self, $row, $text) = @_;
+                my ($terminal, $row, $text) = @_;
 
                 $text = Encode::decode_utf8($text);
 
                 $text =~ s/$ESCAPE\[(.*?)m/&_insert_color($1)/ge;
 
-                $client->send_message(
-                    JSON->new->encode(
-                        {type => 'row', row => $row, text => $text}
-                    )
-                );
+                my $message = JSON->new->encode(
+                    {type => 'row', row => $row, text => $text});
+                $self->send_message($message);
             },
             on_finished => sub {
-                $self->drop($client);
+                my $terminal = shift;
+
+                $self->disconnect;
             }
         );
 
-        $self->event_reactor->add_atom($terminal);
-
-        $terminal->start;
-
-        $client->on_message(
+        $self->on_message(
             sub {
-                my ($client, $message) = @_;
+                my ($self, $message) = @_;
 
                 my $json = JSON->new;
 
@@ -74,11 +69,17 @@ ReAnimator->new(
                 else {
                     warn "Unknown type '$type'";
                 }
-
             }
         );
-    }
-)->listen->start;
+
+        $self->on_disconnect(
+            sub {
+            }
+        );
+
+        $terminal->start;
+    };
+}
 
 sub _insert_color {
     my $color = shift;
@@ -128,3 +129,5 @@ sub _insert_color {
 
     return $string;
 }
+
+1;

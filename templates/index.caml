@@ -1,0 +1,68 @@
+<!doctype html><html>
+    <head>
+        <title>Showmetheshell</title>
+        <link rel="stylesheet" href="/styles.css" type="text/css" />
+        <script type="text/javascript" src="/jquery.js"></script>
+        <script type="text/javascript" src="/jquery.json.js"></script>
+        <script type="text/javascript" src="/shell.js"></script>
+        <script>WEB_SOCKET_SWF_LOCATION = '/socket.io/WebSocketMain.swf';</script>
+        <script type="text/javascript" src="/socket.io/socket.io.js"></script>
+        <script type="text/javascript">
+            $(document).ready(function() {
+                var socket = new io.Socket(null, {port: 5000, rememberTransport: false});
+                var shell  = new Shell();
+
+                socket.on('message', function(data) {
+                    if (typeof data == 'undefined' || data === null)
+                        return;
+
+                    data = $.evalJSON(data);
+
+                    if (data.type == 'history') {
+                        for (var i = 0; i < data.history.length; i++) {
+                            shell.updateRow(i + 1, data.history[i]);
+                        }
+                    }
+                    else if (data.type == 'row') {
+                        shell.updateRow(data.row, data.text);
+                    }
+                });
+
+                shell.onsend = function(message) {
+                    socket.send(message);
+                };
+
+                socket.on('connect', function() {
+                    $('#disconnect').html('<a href="#">Disconnect</a>');
+                    $('#disconnect > a').click(function() {
+                        socket.disconnect();
+                        return false;
+                    });
+
+                    $('#container').html('Connected. Initializing...');
+
+                    shell.init();
+                });
+
+                socket.on('disconnect', function() {
+                    shell.close();
+                    $('#disconnect').html('');
+                    $('#container').html('Disconnected');
+                });
+
+                socket.on('connect_failed', function() {
+                    $('#disconnect').html('');
+                    $('#container').html('Connect failed');
+                });
+
+                socket.connect();
+            });
+        </script>
+    </head>
+    <body>
+        <div id="disconnect"></div>
+        <div id="container">
+            Connecting...
+        </div>
+    </body>
+</html>

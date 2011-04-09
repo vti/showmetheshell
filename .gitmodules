@@ -1,0 +1,3 @@
+[submodule "contrib/socket.io"]
+	path = contrib/socket.io
+	url = https://github.com/LearnBoost/Socket.IO

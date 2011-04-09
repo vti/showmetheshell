@@ -3,26 +3,31 @@ package Terminal;
 use strict;
 use warnings;
 
-use base 'EventReactor::ConnectedAtom';
-
-use IO::Handle;
 use IO::Pty;
-use POSIX ':sys_wait_h';
+use POSIX ();
 use Term::VT102;
 
-use constant DEBUG => !!$ENV{TERMINAL_DEBUG};
+use Terminal::Handle;
+
+use constant DEBUG => $ENV{TERMINAL_DEBUG};
 
 my $ESCAPE = pack('C', 0x1B);
 
 sub new {
-    my $self = shift->SUPER::new(@_);
+    my $class = shift;
+
+    my $self = {@_};
+    bless $self, $class;
 
     $self->{history} = [];
     $self->{created} = time;
 
-    $self->init;
+    $self->{cols} ||= 80;
+    $self->{rows} ||= 24;
 
-    $self->connected;
+    $self->{cmd} ||= '/bin/sh';
+
+    $self->init;
 
     return $self;
 }
@@ -37,9 +42,10 @@ sub on_finished {
 
 sub init {
     my $self = shift;
-    my $cmd  = shift;
 
-    my $vt = Term::VT102->new(cols => 80, rows => 24);
+    DEBUG && warn "Creating Term::VT102\n";
+
+    my $vt = Term::VT102->new(cols => $self->{cols}, rows => $self->{rows});
 
     # Convert linefeeds to linefeed + carriage return.
     $vt->option_set('LFTOCRLF', 1);
@@ -47,6 +53,7 @@ sub init {
     # Make sure line wrapping is switched on.
     $vt->option_set('LINEWRAP', 1);
 
+    DEBUG && warn "Creating IO::Pty\n";
     my $pty = IO::Pty->new;
 
     my $tty_name = $pty->ttyname;
@@ -55,13 +62,8 @@ sub init {
     }
     $pty->autoflush;
 
-    my $handle = IO::Handle->new_from_fd($pty->fileno, 'w+');
-
-    $handle->blocking(0);
-
-    $self->{vt}     = $vt;
-    $self->{pty}    = $pty;
-    $self->{handle} = $handle;
+    $self->{vt}  = $vt;
+    $self->{pty} = $pty;
 
     return $self;
 }
@@ -69,12 +71,16 @@ sub init {
 sub start {
     my $self = shift;
 
+    DEBUG && warn "Starting a new process\n";
+
     my $vt  = $self->vt;
     my $pty = $self->pty;
     my $cmd = $self->cmd;
 
     my $shell_pid = _spawn_shell($vt, $pty, $cmd);
     $self->{shell_pid} = $shell_pid;
+
+    $self->{handle} = $self->_build_handle;
 
     $vt->callback_set(
         OUTPUT => sub {
@@ -99,12 +105,9 @@ sub start {
     return $self;
 }
 
-sub handle { shift->{handle} }
-
 sub changedrows { shift->{changedrows} }
 sub created     { shift->{created} }
 sub history     { shift->{history} }
-sub id          { shift->{id} }
 sub pty         { shift->{pty} }
 sub shell_pid   { shift->{shell_pid} }
 sub vt          { shift->{vt} }
@@ -113,10 +116,11 @@ sub cmd         { shift->{cmd} }
 sub is_spawned { shift->{spawned} }
 
 sub read {
-    my ($self, $chunk) = @_;
+    my $self = shift;
+    my ($chunk) = @_;
 
     $self->on_finished->($self), return
-      if waitpid($self->shell_pid, &WNOHANG) > 0;
+      if waitpid($self->shell_pid, POSIX::WNOHANG) > 0;
 
     $self->vt->process($chunk);
 
@@ -126,8 +130,18 @@ sub read {
 
         $self->history->[$row - 1] = $text;
 
+        DEBUG && warn "row $row changed: $text\n";
         $self->on_row_changed->($self, $row, $text);
     }
+}
+
+sub write {
+    my $self = shift;
+    my ($chunk) = @_;
+
+    $self->{handle}->write($chunk);
+
+    return $self;
 }
 
 sub key {
@@ -160,8 +174,8 @@ sub right { shift->move('right') }
 sub down  { shift->move('down') }
 
 sub move {
-    my $self      = shift;
-    my $direction = shift;
+    my $self = shift;
+    my ($direction) = @_;
 
     my $buffer;
 
@@ -182,6 +196,26 @@ sub move {
     }
 
     $self->write($buffer);
+}
+
+sub _build_handle {
+    my $self = shift;
+
+    $self->{handle} ||= Terminal::Handle->new_from_fd(
+        $self->pty->fileno,
+        on_read => sub {
+            my $handle = shift;
+            my ($chunk) = @_;
+
+            $self->read($chunk);
+        },
+        on_eof => sub {
+        },
+        on_error => sub {
+        }
+    );
+
+    return $self->{handle};
 }
 
 sub _vt_rowchange {
