@@ -14,15 +14,6 @@ sub new {
 
     $self->{handle} = AnyEvent::Handle->new(
         fh       => $self->{fh},
-        on_error => sub {
-            my $handle = shift;
-            my ($is_fatal, $message) = @_;
-        },
-        on_eof => sub {
-            my $handle = shift;
-
-            $self->{on_eof}->($self);
-        },
         on_read => sub {
             my $handle = shift;
 
@@ -30,6 +21,17 @@ sub new {
             $handle->rbuf = '';
 
             $self->{on_read}->($self, $chunk);
+        },
+        on_eof => sub {
+            my $handle = shift;
+
+            $self->{on_eof}->($self);
+        },
+        on_error => sub {
+            my $handle = shift;
+            my ($is_fatal, $message) = @_;
+
+            $self->{on_error}->($message);
         }
     );
 
