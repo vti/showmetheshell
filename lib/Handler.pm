@@ -36,6 +36,7 @@ sub run {
 
                 $text = Encode::decode_utf8($text);
 
+                $text =~ s/ /&nbsp;/g;
                 $text = $handler->{color}->colorize($text);
 
                 my $message = JSON->new->encode(
