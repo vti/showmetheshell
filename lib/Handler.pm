@@ -4,9 +4,8 @@ use strict;
 use warnings;
 
 use Terminal;
-use Terminal::Color;
-use Encode ();
-use JSON   ();
+use Terminal::Ascii2Html;
+use JSON ();
 
 my $ESCAPE = pack('C', 0x1B);
 
@@ -16,7 +15,7 @@ sub new {
     my $self = {};
     bless $self, $class;
 
-    $self->{color} = Terminal::Color->new;
+    $self->{ascii2html} = Terminal::Ascii2Html->new;
 
     return $self;
 }
@@ -34,13 +33,17 @@ sub run {
             on_row_changed => sub {
                 my ($terminal, $row, $text) = @_;
 
-                $text = Encode::decode_utf8($text);
-
-                $text =~ s/ /&nbsp;/g;
-                $text = $handler->{color}->colorize($text);
+                $text = $handler->{ascii2html}->htmlify($text);
 
                 my $message = JSON->new->encode(
                     {type => 'row', row => $row, text => $text});
+                $self->send_message($message);
+            },
+            on_cursor_move => sub {
+                my ($terminal, $x, $y) = @_;
+
+                my $message =
+                  JSON->new->encode({type => 'cursor', x => $x, y => $y});
                 $self->send_message($message);
             },
             on_finished => sub {

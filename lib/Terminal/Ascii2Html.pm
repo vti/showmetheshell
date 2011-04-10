@@ -1,7 +1,9 @@
-package Terminal::Color;
+package Terminal::Ascii2Html;
 
 use strict;
 use warnings;
+
+use Encode ();
 
 my $ESCAPE = pack('C', 0x1B);
 
@@ -35,7 +37,6 @@ my $COLORS = {
     47 => 'bg-white',
 };
 
-
 sub new {
     my $class = shift;
 
@@ -43,6 +44,25 @@ sub new {
     bless $self, $class;
 
     return $self;
+}
+
+sub htmlify {
+    my $self = shift;
+    my ($text) = @_;
+
+    $text = Encode::decode('UTF-8', $text);
+
+    $text =~ s/&/&amp;/g;
+    $text =~ s/</&lt;/g;
+    $text =~ s/>/&gt;/g;
+    $text =~ s/"/&quot;/g;
+    $text =~ s/'/&#39;/g;
+
+    $text =~ s/ /&nbsp;/g;
+
+    $text = $self->colorize($text);
+
+    return $text;
 }
 
 sub colorize {

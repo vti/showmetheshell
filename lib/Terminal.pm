@@ -27,6 +27,10 @@ sub new {
 
     $self->{cmd} ||= '/bin/sh';
 
+    $self->{on_row_chainged} ||= sub { };
+    $self->{on_cursor_move}  ||= sub { };
+    $self->{on_finished}     ||= sub { };
+
     $self->init;
 
     return $self;
@@ -34,6 +38,10 @@ sub new {
 
 sub on_row_changed {
     @_ > 1 ? $_[0]->{on_row_changed} = $_[1] : $_[0]->{on_row_changed};
+}
+
+sub on_cursor_move {
+    @_ > 1 ? $_[0]->{on_cursor_move} = $_[1] : $_[0]->{on_cursor_move};
 }
 
 sub on_finished {
@@ -166,6 +174,8 @@ sub key {
     }
 
     $self->write($buffer);
+
+    $self->on_cursor_move->($self, $self->vt->x, $self->vt->y);
 }
 
 sub left  { shift->move('left') }
@@ -196,6 +206,8 @@ sub move {
     }
 
     $self->write($buffer);
+
+    $self->on_cursor_move->($self, $self->vt->x, $self->vt->y);
 }
 
 sub _build_handle {
