@@ -1,14 +1,13 @@
 HTML5 WebSocket Shell
 
-See screenshots here
-http://github.com/vti/showmetheshell/tree/master/screenshots
-
 Features:
 
- * CTRL keys (-D, -C, -L, -W etc)
- * Tab key
- * Arrow keys
- * Esc
+ * Socket.IO compatible server
+ * Keyboard captures
+     * CTRL keys (-D, -C, -L, -W etc)
+     * Tab key
+     * Arrow keys
+     * Esc
  * Colors
  * Unicode
 

@@ -1,13 +1,26 @@
 Showmetheshell installation steps:
 
-    git clone http://github.com/vti/showmetheshell.git
-    cd showmetheshell
-    git submodule update --init
-    bin/cpanm --sudo IO::Pty Term::VT102 JSON Plack Twiggy Plack::Middleware::SocketIO Text::Caml
-    twiggy showmetheshell.psgi
+    * Clone repository
 
-If a non websocket aware browser is used, flash policy server must be started:
+        git clone --recursive http://github.com/vti/showmetheshell.git
 
-    sudo perl bin/flash-policy-server.p &
+    * Enter the source code
 
-Point your browser to http://localhost:5000/
+        cd showmetheshell
+
+    * Install Perl dependencies from CPAN (requires root privileges; for
+      installing them as a local user read more about App::cpanminus)
+
+        bin/cpanm --sudo IO::Pty Term::VT102 JSON Plack Twiggy \
+            Plack::Middleware::SocketIO Text::Caml
+
+    * Start the server
+
+        twiggy showmetheshell.psgi
+
+    * Start optional Flash Policy server for browsers that do not support
+      WebSockets natively but have Flash plugin installed
+
+        sudo perl bin/flash-policy-server.p &
+
+    * Point your browser to http://localhost:5000/
