@@ -26,6 +26,9 @@
                     else if (data.type == 'row') {
                         shell.updateRow(data.row, data.text);
                     }
+                    else if (data.type == 'cursor') {
+                        //shell.moveCursor(data.x, data.y);
+                    }
                 });
 
                 shell.onsend = function(message) {

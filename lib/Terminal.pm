@@ -5,13 +5,11 @@ use warnings;
 
 use IO::Pty;
 use POSIX ();
-use Term::VT102;
+use Term::VT102 ();
 
 use Terminal::Handle;
 
 use constant DEBUG => $ENV{TERMINAL_DEBUG};
-
-my $ESCAPE = pack('C', 0x1B);
 
 sub new {
     my $class = shift;
@@ -106,7 +104,7 @@ sub start {
     $vt->callback_set('CLEAR',       \&_vt_changeall, $changedrows);
     $vt->callback_set('SCROLL_UP',   \&_vt_changeall, $changedrows);
     $vt->callback_set('SCROLL_DOWN', \&_vt_changeall, $changedrows);
-    $vt->callback_set('GOTO',        \&_vt_cursormove);
+    $vt->callback_set('GOTO',        \&_vt_cursormove, $self);
 
     $self->{spawned} = 1;
 
@@ -145,9 +143,8 @@ sub read {
 
 sub write {
     my $self = shift;
-    my ($chunk) = @_;
 
-    $self->{handle}->write($chunk);
+    $self->{handle}->write(@_);
 
     return $self;
 }
@@ -174,8 +171,6 @@ sub key {
     }
 
     $self->write($buffer);
-
-    $self->on_cursor_move->($self, $self->vt->x, $self->vt->y);
 }
 
 sub left  { shift->move('left') }
@@ -190,24 +185,24 @@ sub move {
     my $buffer;
 
     if ($direction eq 'left') {
-        $buffer = "$ESCAPE\[D";
+        $buffer = "\e\[D";
     }
     elsif ($direction eq 'up') {
-        $buffer = "$ESCAPE\[A";
+        $buffer = "\e\[A";
     }
     elsif ($direction eq 'right') {
-        $buffer = "$ESCAPE\[C";
+        $buffer = "\e\[C";
     }
     elsif ($direction eq 'down') {
-        $buffer = "$ESCAPE\[B";
+        $buffer = "\e\[B";
     }
     else {
         return;
     }
 
-    $self->write($buffer);
+    warn "move $direction";
 
-    $self->on_cursor_move->($self, $self->vt->x, $self->vt->y);
+    $self->write($buffer);
 }
 
 sub _build_handle {
@@ -245,7 +240,9 @@ sub _vt_changeall {
 }
 
 sub _vt_cursormove {
-    my ($vtobject, $type, $arg1, $arg2) = @_;
+    my ($vtobject, $type, $arg1, $arg2, $self) = @_;
+
+    #$self->on_cursor_move->($self, $arg1, $arg2);
 }
 
 sub _spawn_shell {

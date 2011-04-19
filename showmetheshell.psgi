@@ -27,7 +27,7 @@ builder {
       root => 'htdocs';
 
     enable "SocketIO",
-        instance => Handler->new(cmd => '/bin/sh');
+        instance => Handler->new(cmd => '/bin/bash');
 
     $app;
 };

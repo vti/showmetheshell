@@ -5,8 +5,6 @@ use warnings;
 
 use Encode ();
 
-my $ESCAPE = pack('C', 0x1B);
-
 my $COLORS = {
     0 => 'dull',
     1 => 'bright',
@@ -50,7 +48,7 @@ sub htmlify {
     my $self = shift;
     my ($text) = @_;
 
-    $text = Encode::decode('UTF-8', $text);
+    #$text = Encode::decode('UTF-8', $text);
 
     $text =~ s/&/&amp;/g;
     $text =~ s/</&lt;/g;
@@ -62,6 +60,7 @@ sub htmlify {
 
     $text = $self->colorize($text);
 
+    #$text = Encode::decode('UTF-8', $text);
     return $text;
 }
 
@@ -70,7 +69,7 @@ sub colorize {
     my ($text) = @_;
 
     my $depth = 0;
-    while ($text =~ s/$ESCAPE\[(.*?)m/&_insert_color($1, $depth)/e) {
+    while ($text =~ s/\e\[(.*?)m/&_insert_color($1, $depth)/e) {
         $depth++;
     }
 

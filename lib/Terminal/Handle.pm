@@ -13,7 +13,7 @@ sub new {
     bless $self, $class;
 
     $self->{handle} = AnyEvent::Handle->new(
-        fh       => $self->{fh},
+        fh      => $self->{fh},
         on_read => sub {
             my $handle = shift;
 
@@ -49,9 +49,20 @@ sub new_from_fd {
 
 sub write {
     my $self = shift;
-    my ($chunk) = @_;
+    my ($chunk, $cb) = @_;
 
     $self->{handle}->push_write($chunk);
+
+    if ($cb) {
+        warn 'on_drain';
+        $self->{handle}->on_drain(
+            sub {
+                $self->{handle}->on_drain(undef);
+
+                $cb->($self);
+            }
+        );
+    }
 
     return $self;
 }

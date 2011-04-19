@@ -1,6 +1,9 @@
 function Shell(o) {
     var self = this;
 
+    self.width = 80;
+    self.height = 24;
+
     var container = $('#container');
     container.html('');
 
@@ -11,19 +14,20 @@ function Shell(o) {
         container.html('');
 
         container.append('<div id="shell"></div>');
+        container.append('<div id="shell-cursor"></div>');
 
         var shell = $('#shell');
+        var shellCursor = $('#shell-cursor');
 
         var spaces = '';
-        for (var i = 1; i <= 80; i++) {
+        for (var i = 1; i <= self.width; i++) {
             spaces = spaces + "&nbsp;";
         }
 
-        shell.append('<div class="row space">' + spaces + '</div>');
-        for (var i = 1; i <= 24; i++) {
-            shell.append('<div class="row" id="row' + i + '">&nbsp;</div>');
+        for (var i = 1; i <= self.height; i++) {
+            shell.append('<div class="row" id="row' + i + '">'+spaces+'</div>');
+            shellCursor.append('<div class="row-cursor" id="row-cursor' + i + '">'+spaces+'</div>');
         }
-        shell.append('<div class="row space">' + spaces + '</div>');
 
         self.bind();
     };
@@ -97,5 +101,20 @@ function Shell(o) {
     self.updateRow = function(n, data) {
         var row = $('#row' + n);
         row.html(data);
+    };
+
+    self.moveCursor = function(x, y) {
+        console.log(y + 'x' + x);
+        var spaces = '';
+        for (var i = 1; i <= self.width; i++) {
+            spaces = spaces + " ";
+        }
+
+        var text = spaces;
+        text = text.substr(0, x) + '|' + text.substr(x + 1);
+        text = text.replace(/ /g, '&nbsp;');
+
+        var row = $('#row-cursor' + y);
+        row.html(text);
     };
 }

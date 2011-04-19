@@ -7,12 +7,10 @@ use Terminal;
 use Terminal::Ascii2Html;
 use JSON ();
 
-my $ESCAPE = pack('C', 0x1B);
-
 sub new {
     my $class = shift;
 
-    my $self = {};
+    my $self = {@_};
     bless $self, $class;
 
     $self->{ascii2html} = Terminal::Ascii2Html->new;
