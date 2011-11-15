@@ -1,12 +1,26 @@
 use strict;
 use warnings;
 
+my $root;
+
+BEGIN {
+    use File::Basename ();
+    use File::Spec     ();
+
+    $root = File::Basename::dirname(__FILE__);
+    $root = File::Spec->rel2abs($root);
+
+    unshift @INC, "$root/../../lib";
+}
+
 use lib 'lib';
 
 use Plack::Builder;
+use Plack::App::File;
 
 use Handler;
 use Text::Caml;
+use PocketIO;
 
 my $caml = Text::Caml->new(templates_path => 'templates');
 
@@ -22,12 +36,24 @@ my $app = sub {
 };
 
 builder {
+    mount '/socket.io/static/flashsocket/WebSocketMain.swf' =>
+      Plack::App::File->new(file => "$root/htdocs/WebSocketMain.swf");
+
+    mount '/socket.io/static/flashsocket/WebSocketMainInsecure.swf' =>
+      Plack::App::File->new(file => "$root/htdocs/WebSocketMainInsecure.swf");
+
     enable "Static",
       path => qr/\.(?:js|css|jpe?g|gif|png|html?|swf|ico)$/,
       root => 'htdocs';
 
-    enable "SocketIO",
-        instance => Handler->new(cmd => '/bin/bash');
+    mount '/socket.io' =>
+      PocketIO->new(instance => Handler->new(cmd => '/bin/bash'));
 
-    $app;
+    mount '/' => builder {
+        enable "Static",
+          path => qr/\.(?:js|css|jpe?g|gif|png|html?|swf|ico)$/,
+          root => "$root/public";
+
+        $app;
+    };
 };

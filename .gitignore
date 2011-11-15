@@ -1,0 +1,8 @@
+*.sw[p-z]
+blib
+Makefile
+MANIFEST
+Makefile.old
+pm_to_blib
+*.bak
+*~

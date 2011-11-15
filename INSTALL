@@ -12,7 +12,7 @@ Showmetheshell installation steps:
       installing them as a local user read more about App::cpanminus)
 
         bin/cpanm --sudo IO::Pty Term::VT102 JSON Plack Twiggy \
-            Plack::Middleware::SocketIO Text::Caml
+            PocketIO Text::Caml
 
     * Start the server
 

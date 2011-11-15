@@ -35,24 +35,24 @@ sub run {
 
                 my $message = JSON->new->encode(
                     {type => 'row', row => $row, text => $text});
-                $self->send_message($message);
+                $self->send($message);
             },
             on_cursor_move => sub {
                 my ($terminal, $x, $y) = @_;
 
                 my $message =
                   JSON->new->encode({type => 'cursor', x => $x, y => $y});
-                $self->send_message($message);
+                $self->send($message);
             },
             on_finished => sub {
                 my $terminal = shift;
 
-                $self->disconnect;
+                $self->close;
             }
         );
 
-        $self->on_message(
-            sub {
+        $self->on(
+            message => sub {
                 my ($self, $message) = @_;
 
                 my $json = JSON->new;
@@ -77,8 +77,8 @@ sub run {
             }
         );
 
-        $self->on_disconnect(
-            sub {
+        $self->on(
+            disconnect => sub {
             }
         );
 
